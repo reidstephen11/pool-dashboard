@@ -33,14 +33,49 @@
   </svg>
 </template>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
+:root {
+  /* Surfaces */
+  --bg:        #f6f5f2;        /* warm neutral page bg */
+  --surface:   #ffffff;
+  --surface-2: #faf9f6;        /* subtle alt surface */
+  --ink:       #0c0c0d;        /* near-black, warm */
+  --ink-2:     #2a2a2c;
+  --muted:     #6b6b70;
+  --faint:     #a4a4a8;
+  --hairline:  #e8e6df;        /* 1px borders, no shadows */
+  --hairline-2:#f0eee8;
+
+  /* Accent — single deep cobalt; everything that says "primary" uses this */
+  --accent:    oklch(0.52 0.16 252);
+  --accent-2:  oklch(0.46 0.17 252);
+  --accent-tint: oklch(0.96 0.025 252);
+
+  /* Status — saturated, not pastel */
+  --bad:       oklch(0.55 0.19 25);
+  --bad-tint:  oklch(0.965 0.022 25);
+  --warn:      oklch(0.62 0.14 70);
+  --warn-tint: oklch(0.965 0.025 70);
+  --ok:        oklch(0.50 0.12 155);
+  --ok-tint:   oklch(0.965 0.025 155);
+
+  /* Hero ink-block */
+  --hero-bg:   #0c0c0d;
+  --hero-fg:   #f6f5f2;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 body {
-  background: #f4f6f9;
+  background: var(--bg);
   min-height: 100vh;
   margin: 0;
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  color: var(--ink);
+  font-feature-settings: "ss01", "ss02", "cv11";
+  letter-spacing: -0.005em;
 }
 
 /* Scrollable screen inside the frame */
@@ -50,191 +85,200 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  background: #f4f6f9;
+  background: var(--bg);
   scrollbar-width: none;
 }
 .screen::-webkit-scrollbar { display: none; }
 
 /* Typography */
-.t-display { font-family: 'Sora', sans-serif; font-weight: 800; }
-.t-title   { font-family: 'Sora', sans-serif; font-weight: 700; }
-.t-label   { font-family: 'DM Sans', sans-serif; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px; }
+.t-display { font-family: 'Geist', sans-serif; font-weight: 600; letter-spacing: -0.022em; }
+.t-title   { font-family: 'Geist', sans-serif; font-weight: 600; letter-spacing: -0.012em; }
+.t-label   { font-family: 'Geist Mono', ui-monospace, monospace; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10.5px; color: var(--muted); }
+.t-num     { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
-/* ── Hero header gradient ── */
+/* ── Hero — flat ink block, no gradient ── */
 .hero {
-  background: linear-gradient(160deg, #0b2d45 0%, #0e4a6e 60%, #0d6e8e 100%);
-  padding: calc(20px + env(safe-area-inset-top, 0px)) 20px 32px;
+  background: var(--hero-bg);
+  color: var(--hero-fg);
+  padding: calc(22px + env(safe-area-inset-top, 0px)) 22px 26px;
   position: relative;
   overflow: hidden;
 }
-.hero--compact {
-  padding-top: calc(54px + env(safe-area-inset-top, 0px));
-  padding-bottom: 24px;
-}
-.hero::after {
+.hero::before {
+  /* very subtle dotted texture, low contrast */
   content: '';
-  position: absolute;
-  bottom: -40px; left: 0; right: 0;
-  height: 60px;
-  background: #f4f6f9;
-  border-radius: 28px 28px 0 0;
-}
-.hero-waves {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  opacity: 0.06;
-  background-image: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 18px,
-    rgba(255,255,255,0.8) 18px,
-    rgba(255,255,255,0.8) 19px
-  );
+  position: absolute; inset: 0;
+  background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 14px 14px;
+  pointer-events: none;
 }
 
 /* ── Upload zone ── */
 .upload-zone {
-  border: 1.5px dashed rgba(0,180,216,0.6);
-  border-radius: 14px;
-  background: rgba(0,180,216,0.07);
+  border: 1px dashed rgba(255,255,255,0.22);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
   padding: 14px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
   cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
+  transition: background 0.18s, border-color 0.18s;
 }
-.upload-zone:active { background: rgba(0,180,216,0.15); border-color: #00b4d8; }
+.upload-zone:hover  { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.32); }
+.upload-zone:active { background: rgba(255,255,255,0.10); }
 
-/* ── Status pills ── */
-.pills-row { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 20px; margin-top: -8px; position: relative; z-index: 1; }
+/* ── Status pills (chips) ── */
+.pills-row { display: flex; gap: 6px; flex-wrap: wrap; padding: 14px 18px 0; }
 .pill {
-  padding: 6px 14px;
-  border-radius: 20px;
-  font-family: 'Sora', sans-serif;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  font-family: 'Geist', sans-serif;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
+  letter-spacing: -0.005em;
   cursor: pointer;
-  transition: transform 0.15s;
+  transition: transform 0.15s, background 0.15s;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--ink-2);
 }
-.pill:active { transform: scale(0.95); }
-.pill-bad  { background: #fde8e8; color: #c0392b; }
-.pill-ok   { background: #e3f5ec; color: #1a7a47; }
-.pill-warn { background: #fef3e2; color: #b05a00; }
+.pill:active { transform: scale(0.96); }
+.pill::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+.pill-bad::before  { background: var(--bad); }
+.pill-warn::before { background: var(--warn); }
+.pill-ok::before   { background: var(--ok); }
 
 /* ── Section headers ── */
-.sec-head { padding: 20px 20px 8px; display: flex; align-items: center; justify-content: space-between; }
-.sec-head span { font-family: 'DM Sans'; font-weight: 600; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #8a9ab0; white-space: nowrap; }
-.sec-head a { font-size: 12px; color: #00b4d8; font-weight: 600; cursor: pointer; }
+.sec-head { padding: 22px 18px 10px; display: flex; align-items: center; justify-content: space-between; }
+.sec-head span { font-family: 'Geist Mono', ui-monospace, monospace; font-weight: 500; font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.sec-head a { font-size: 12.5px; color: var(--accent); font-weight: 500; cursor: pointer; letter-spacing: -0.005em; }
+
+/* ── Card primitives ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+}
 
 /* ── Trend chart card ── */
 .chart-card {
-  margin: 0 16px;
-  background: #fff;
-  border-radius: 18px;
+  margin: 0 14px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
   padding: 16px;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.06);
 }
 
 /* ── Todo cards ── */
-.todo-list { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
-.todo-wrap { position: relative; overflow: hidden; border-radius: 16px; }
+.todo-list { padding: 0 14px; display: flex; flex-direction: column; gap: 8px; }
+.todo-wrap { position: relative; overflow: hidden; border-radius: 14px; }
 .todo-delete-bg {
   position: absolute; right: 0; top: 0; bottom: 0; width: 80px;
-  background: #e74c3c; display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 22px; border-radius: 0 16px 16px 0;
+  background: var(--bad); display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 18px; border-radius: 0 14px 14px 0;
 }
 .todo-card {
-  background: #fff;
-  border-radius: 16px;
-  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 14px 16px 14px 18px;
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  box-shadow: 0 1px 8px rgba(0,0,0,0.05);
   cursor: pointer;
-  transition: opacity 0.25s, transform 0.2s;
+  transition: opacity 0.25s, transform 0.2s, border-color 0.18s;
   position: relative;
   overflow: hidden;
 }
-.todo-card.done { opacity: 0.45; }
-.todo-card:active { transform: scale(0.98); }
+.todo-card:hover { border-color: #ddd9ce; }
+.todo-card.done { opacity: 0.5; }
+.todo-card:active { transform: scale(0.99); }
 .todo-accent {
   position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 4px;
-  border-radius: 16px 0 0 16px;
+  left: 0; top: 14px; bottom: 14px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
 }
 .todo-check {
-  width: 26px; height: 26px; min-width: 26px;
-  border-radius: 8px;
-  border: 2px solid #d0d8e4;
+  width: 22px; height: 22px; min-width: 22px;
+  border-radius: 999px;
+  border: 1.5px solid #cdcabf;
   display: flex; align-items: center; justify-content: center;
-  margin-top: 2px;
+  margin-top: 1px;
   transition: background 0.2s, border-color 0.2s;
-  font-size: 14px;
+  font-size: 12px;
 }
-.todo-check.checked { background: #1a7a47; border-color: #1a7a47; color: #fff; }
+.todo-check.checked { background: var(--ink); border-color: var(--ink); color: #fff; }
 
 /* ── Chemistry range bars ── */
 .metric-card {
-  background: #fff;
-  border-radius: 16px;
-  padding: 16px;
-  margin: 0 16px 10px;
-  box-shadow: 0 1px 8px rgba(0,0,0,0.05);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 16px 18px 18px;
+  margin: 0 14px 8px;
 }
 .range-track {
-  height: 8px; border-radius: 4px; background: #eef0f5;
-  position: relative; margin: 10px 0 4px;
+  height: 4px; border-radius: 2px; background: var(--hairline-2);
+  position: relative; margin: 14px 0 8px;
 }
-.range-zone { position: absolute; height: 100%; border-radius: 4px; background: #c8eedb; }
+.range-zone { position: absolute; height: 100%; border-radius: 2px; background: oklch(0.85 0.07 155); }
 .range-marker {
-  position: absolute; top: -4px;
-  width: 16px; height: 16px;
+  position: absolute; top: -5px;
+  width: 14px; height: 14px;
   border-radius: 50%;
-  border: 2.5px solid #fff;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  border: 3px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--hairline);
   transform: translateX(-50%);
 }
 
 /* ── Log form ── */
-.log-form { padding: 0 16px; }
+.log-form { padding: 0 14px; }
 .form-field {
-  background: #fff;
-  border-radius: 14px;
-  padding: 14px 16px;
-  margin-bottom: 10px;
-  box-shadow: 0 1px 8px rgba(0,0,0,0.04);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  transition: border-color 0.18s;
 }
-.form-label { font-size: 11px; font-weight: 600; color: #8a9ab0; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
-.form-val { font-family: 'Sora', sans-serif; font-size: 15px; font-weight: 600; color: #0b1f2e; }
-.form-select {
-  display: flex; align-items: center; justify-content: space-between;
-}
-.form-select .chevron { color: #b0bac8; font-size: 12px; }
+.form-field:focus-within { border-color: var(--ink-2); }
+.form-label { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.form-val { font-family: 'Geist', sans-serif; font-size: 15px; font-weight: 500; color: var(--ink); letter-spacing: -0.005em; }
+.form-select { display: flex; align-items: center; justify-content: space-between; }
+.form-select .chevron { color: var(--faint); font-size: 11px; }
 
 /* ── Quick-add buttons ── */
-.quick-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; padding: 0 16px 16px; }
+.quick-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; padding: 0 14px 16px; }
 .quick-btn {
-  background: #fff;
-  border-radius: 14px;
-  padding: 12px 4px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 14px 4px 12px;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
-  box-shadow: 0 1px 8px rgba(0,0,0,0.05);
   cursor: pointer;
-  transition: transform 0.15s;
-  font-size: 11px; font-weight: 600; color: #5a6878; text-align: center;
+  transition: transform 0.15s, border-color 0.18s, background 0.18s;
+  font-size: 11.5px; font-weight: 500; color: var(--ink-2); text-align: center;
+  letter-spacing: -0.005em;
 }
-.quick-btn:active { transform: scale(0.93); }
-.quick-btn .icon { font-size: 22px; }
+.quick-btn:hover { border-color: #ddd9ce; }
+.quick-btn:active { transform: scale(0.97); }
+.quick-btn .icon { font-size: 18px; line-height: 1; opacity: 0.85; }
 
 /* ── Bottom nav ── */
 .bottom-nav {
   position: sticky; bottom: 0;
-  background: rgba(255,255,255,0.95);
-  backdrop-filter: blur(10px);
-  border-top: 1px solid #eef0f5;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: saturate(140%) blur(14px);
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  border-top: 1px solid var(--hairline);
   display: grid; grid-template-columns: repeat(4,1fr);
   padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
 }
@@ -242,40 +286,60 @@ body {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   cursor: pointer;
   padding: 4px 0;
-  font-size: 10px; font-weight: 600;
-  color: #b0bac8;
+  font-size: 10px; font-weight: 500;
+  color: var(--faint);
   transition: color 0.15s;
+  letter-spacing: 0.005em;
 }
-.nav-item.active { color: #00b4d8; }
-.nav-item .nav-icon { font-size: 20px; line-height: 1; }
+.nav-item.active { color: var(--ink); }
+.nav-item.active .nav-icon { color: var(--accent); }
+.nav-item .nav-icon { font-size: 17px; line-height: 1; }
 
 /* ── Primary button ── */
 .btn-primary {
-  background: linear-gradient(135deg, #0096b7, #00b4d8);
+  background: var(--ink);
   color: #fff;
   border: none;
-  border-radius: 24px;
-  padding: 16px;
-  font-family: 'Sora', sans-serif;
-  font-size: 15px;
-  font-weight: 700;
+  border-radius: 12px;
+  padding: 15px;
+  font-family: 'Geist', sans-serif;
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
   width: 100%;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,180,216,0.35);
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.15s, background 0.18s;
 }
-.btn-primary:active { transform: scale(0.97); box-shadow: 0 2px 8px rgba(0,180,216,0.2); }
+.btn-primary:hover  { background: #1d1d20; }
+.btn-primary:active { transform: scale(0.98); }
+
+/* ── Header chip button (re-upload, export) ── */
+.chip-btn {
+  background: rgba(255,255,255,0.07);
+  color: var(--hero-fg);
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: 'Geist', sans-serif;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.18s;
+}
+.chip-btn:hover { background: rgba(255,255,255,0.12); }
 
 /* ── Done toast ── */
 .toast {
   position: fixed;
-  bottom: 90px; left: 50%; transform: translateX(-50%) translateY(20px);
-  background: #0b2d45;
+  bottom: 88px; left: 50%; transform: translateX(-50%) translateY(16px);
+  background: var(--ink);
   color: #fff;
-  padding: 10px 20px;
-  border-radius: 20px;
+  padding: 10px 18px;
+  border-radius: 999px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: -0.005em;
   opacity: 0;
   transition: opacity 0.3s, transform 0.3s;
   pointer-events: none;
@@ -283,9 +347,26 @@ body {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ── Status badge inline ── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: 'Geist', sans-serif;
+  font-size: 11px; font-weight: 500;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  letter-spacing: -0.005em;
+}
+.badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; }
+.badge-ok   { background: var(--ok-tint);   color: var(--ok); }
+.badge-ok::before  { background: var(--ok); }
+.badge-bad  { background: var(--bad-tint);  color: var(--bad); }
+.badge-bad::before { background: var(--bad); }
+.badge-warn { background: var(--warn-tint); color: var(--warn); }
+.badge-warn::before{ background: var(--warn); }
+
 /* ── Animations ── */
-@keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
-.fade-up { animation: fadeUp 0.35s ease both; }
+@keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+.fade-up { animation: fadeUp 0.32s cubic-bezier(0.2, 0.6, 0.2, 1) both; }
 </style>
 </head>
 <body>
@@ -313,17 +394,24 @@ async function parsePoolwerxPDF(file) {
   }
   console.log('=== PDF RAW TEXT ===\n' + txt + '\n=== END ===');
 
-  // Helper: find value before a label (Poolwerx PDF has values BEFORE labels in table)
-  // PDF.js extracts table cells in reading order: value, prev-value, label, range
+  // Helper: find value before a label.
+  // Poolwerx PDF table reading order is: CURRENT  PREVIOUS  LABEL  RANGE
+  // e.g. "7.4  8.1  pH  7.2-7.6"  →  current = 7.4, previous = 8.1
+  // We want the FIRST of the two numbers (the current measured value, shown
+  // in the colored box on the report).
   const grabBefore = (label) => {
-    // Try: number immediately before label (with optional whitespace)
-    const re = new RegExp('([\\d.]+)\\s+' + label, 'i');
-    const m = txt.match(re);
-    if (m) return parseFloat(m[1]);
-    // Fallback: number after label
-    const re2 = new RegExp(label + '[\\s\\S]{0,30}?([\\d.]+)', 'i');
-    const m2 = txt.match(re2);
-    return m2 ? parseFloat(m2[1]) : null;
+    // Primary: capture both numbers before the label, take the first.
+    const rePair = new RegExp('([\\d.]+)\\s+([\\d.]+)\\s+' + label + '\\b', 'i');
+    const mPair = txt.match(rePair);
+    if (mPair) return parseFloat(mPair[1]);
+    // Fallback: only one number before the label.
+    const reSingle = new RegExp('([\\d.]+)\\s+' + label + '\\b', 'i');
+    const mSingle = txt.match(reSingle);
+    if (mSingle) return parseFloat(mSingle[1]);
+    // Last resort: number after label.
+    const reAfter = new RegExp(label + '[\\s\\S]{0,30}?([\\d.]+)', 'i');
+    const mAfter = txt.match(reAfter);
+    return mAfter ? parseFloat(mAfter[1]) : null;
   };
 
   // Parse date
@@ -456,33 +544,33 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5 }) {
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible' }}>
       {/* Target band */}
-      <rect x={pad.l} y={bandTop} width={cW} height={bandH} fill="#00b4d8" opacity={0.1} rx={3} />
-      <line x1={pad.l} y1={loY} x2={pad.l + cW} y2={loY} stroke="#00b4d8" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
-      <line x1={pad.l} y1={hiY} x2={pad.l + cW} y2={hiY} stroke="#00b4d8" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
+      <rect x={pad.l} y={bandTop} width={cW} height={bandH} fill="oklch(0.52 0.16 252)" opacity={0.08} rx={2} />
+      <line x1={pad.l} y1={loY} x2={pad.l + cW} y2={loY} stroke="oklch(0.52 0.16 252)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
+      <line x1={pad.l} y1={hiY} x2={pad.l + cW} y2={hiY} stroke="oklch(0.52 0.16 252)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
 
       {/* Area fill */}
       <defs>
         <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#e74c3c" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="#e74c3c" stopOpacity="0" />
+          <stop offset="0%" stopColor="#0c0c0d" stopOpacity="0.10" />
+          <stop offset="100%" stopColor="#0c0c0d" stopOpacity="0" />
         </linearGradient>
       </defs>
       <path d={areaD} fill="url(#areaGrad)" />
 
       {/* Line */}
-      <path d={pathD} fill="none" stroke="#e74c3c" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={pathD} fill="none" stroke="#0c0c0d" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
 
       {/* Points */}
       {data.map((d, i) => (
-        <circle key={i} cx={px(i)} cy={py(d.val)} r={i === data.length - 1 ? 5 : 3.5}
-          fill={d.val >= lo && d.val <= hi ? '#1a7a47' : '#e74c3c'}
+        <circle key={i} cx={px(i)} cy={py(d.val)} r={i === data.length - 1 ? 4.5 : 3}
+          fill={d.val >= lo && d.val <= hi ? 'oklch(0.50 0.12 155)' : 'oklch(0.55 0.19 25)'}
           stroke="#fff" strokeWidth={1.5} />
       ))}
 
       {/* X labels */}
       {data.map((d, i) => (
         <text key={i} x={px(i)} y={H - 2} textAnchor="middle"
-          style={{ fontSize: 9, fontFamily: 'DM Sans', fill: '#b0bac8', fontWeight: 600 }}>
+          style={{ fontSize: 9, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#a4a4a8', fontWeight: 500, letterSpacing: '0.02em' }}>
           {d.label}
         </text>
       ))}
@@ -490,14 +578,14 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5 }) {
       {/* Y labels */}
       {ticks.map((v, i) => (
         <text key={i} x={pad.l - 4} y={py(v) + 3} textAnchor="end"
-          style={{ fontSize: 8, fontFamily: 'DM Sans', fill: '#c8d0dc' }}>
+          style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#c4c4c8' }}>
           {v.toFixed(1)}
         </text>
       ))}
 
       {/* Target label */}
-      <text x={pad.l + cW} y={Math.min(loY, hiY) - 3} textAnchor="end"
-        style={{ fontSize: 8, fontFamily: 'DM Sans', fill: '#00b4d8', fontWeight: 700 }}>
+      <text x={pad.l + cW} y={Math.min(loY, hiY) - 4} textAnchor="end"
+        style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: 'oklch(0.52 0.16 252)', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
         target
       </text>
     </svg>
@@ -525,26 +613,25 @@ function TodoCard({ t, idx, onToggle, onDelete }) {
 
   return (
     <div className="todo-wrap" style={{ marginBottom: 0 }}>
-      <div className="todo-delete-bg" onClick={() => onDelete(t.id)}>🗑️</div>
+      <div className="todo-delete-bg" onClick={() => onDelete(t.id)}>✕</div>
       <div className={`todo-card fade-up${t.done ? ' done' : ''}`}
         style={{ animationDelay: `${idx * 0.05}s`, transform: `translateX(${swipeX}px)`, transition: swiping ? 'none' : 'transform 0.25s ease' }}
         onClick={() => { if (swipeX < -10) { setSwipeX(0); return; } onToggle(t.id); }}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
         <div className="todo-accent" style={{ background: t.color }} />
-        <div style={{ marginLeft: 4 }}>
+        <div style={{ marginLeft: 2 }}>
           <div className={`todo-check${t.done ? ' checked' : ''}`}>{t.done ? '✓' : ''}</div>
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 3 }}>
-            <div style={{ background: `${t.color}18`, color: t.color, padding: '1px 6px', borderRadius: 6, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em' }}>{t.pri}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ fontFamily: 'Geist Mono, ui-monospace, monospace', color: t.color, fontSize: 9.5, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{t.pri}</div>
           </div>
-          <div className="t-title" style={{ fontSize: 14, color: '#0b1f2e', lineHeight: 1.3 }}>{t.label}</div>
-          <div style={{ color: '#8a9ab0', fontSize: 12, marginTop: 3 }}>{t.reason}</div>
+          <div className="t-title" style={{ fontSize: 14.5, color: 'var(--ink)', lineHeight: 1.35 }}>{t.label}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4, lineHeight: 1.45 }}>{t.reason}</div>
         </div>
-        {/* Desktop fallback delete button (visible when no touch) */}
         <button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
           aria-label="Delete action"
-          style={{ position: 'absolute', top: 8, right: 8, width: 24, height: 24, border: 'none', background: 'transparent', color: '#c8d0dc', fontSize: 14, cursor: 'pointer', borderRadius: 6 }}>×</button>
+          style={{ position: 'absolute', top: 10, right: 10, width: 22, height: 22, border: 'none', background: 'transparent', color: 'var(--faint)', fontSize: 14, cursor: 'pointer', borderRadius: 6 }}>×</button>
       </div>
     </div>
   );
@@ -564,76 +651,77 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
     <div className="screen">
       {/* Hero */}
       <div className="hero">
-        <div className="hero-waves" />
         <div style={{ position: 'relative', zIndex: 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-            <div>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 4 }}>{hasTest ? 'Last tested ' + testData.date : 'No test data yet'}</div>
-              <div className="t-display" style={{ color: '#fff', fontSize: 22, lineHeight: 1.2 }}>
-                {hasTest ? (openCount === 0 ? 'All caught up' : (openCount + ' thing' + (openCount !== 1 ? 's' : '') + ' need attention')) : 'Upload a report to get started'}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)', marginBottom: 8 }}>{hasTest ? 'Last tested · ' + testData.date : 'No test data yet'}</div>
+              <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 26, lineHeight: 1.15 }}>
+                {hasTest ? (openCount === 0 ? 'All caught up.' : (openCount + ' thing' + (openCount !== 1 ? 's' : '') + ' need attention.')) : 'Upload a report to get started.'}
               </div>
             </div>
             {hasTest && openCount > 0 && (
-              <div style={{ background: 'rgba(231,76,60,0.2)', border: '1.5px solid rgba(231,76,60,0.4)', borderRadius: 12, padding: '6px 10px', textAlign: 'center' }}>
-                <div style={{ color: '#ff8080', fontSize: 20, lineHeight: 1 }}>!</div>
-                <div style={{ color: '#ff8080', fontSize: 9, fontWeight: 700, marginTop: 2 }}>URGENT</div>
+              <div style={{ flexShrink: 0, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 10px', textAlign: 'center', minWidth: 54 }}>
+                <div className="t-num" style={{ color: 'var(--hero-fg)', fontSize: 20, lineHeight: 1, fontWeight: 600 }}>{openCount}</div>
+                <div style={{ color: 'oklch(0.78 0.14 25)', fontSize: 9, fontWeight: 500, marginTop: 4, letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: 'Geist Mono, ui-monospace, monospace' }}>Open</div>
               </div>
             )}
           </div>
           {hasTest && (
-            <div style={{ display: 'flex', gap: 16, color: 'rgba(255,255,255,0.45)', fontSize: 11, fontWeight: 500 }}>
-              <span>LSI {testData.lsi} ✓</span>
-              <span>Salt ✓</span>
-              <span>Temp 21°C</span>
+            <div style={{ display: 'flex', gap: 18, color: 'rgba(246,245,242,0.55)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>
+              <span><span style={{ color: 'rgba(246,245,242,0.4)' }}>LSI </span>{testData.lsi}</span>
+              <span><span style={{ color: 'rgba(246,245,242,0.4)' }}>Salt </span>OK</span>
+              <span><span style={{ color: 'rgba(246,245,242,0.4)' }}>Temp </span>21°C</span>
             </div>
           )}
 
           {/* Upload zone inside hero */}
-          <div className="upload-zone" style={{ marginTop: 16, opacity: uploading ? 0.6 : 1 }}
+          <div className="upload-zone" style={{ marginTop: 18, opacity: uploading ? 0.6 : 1 }}
             onClick={onUpload}>
-            <div style={{ fontSize: 28, lineHeight: 1 }}>📄</div>
-            <div>
-              <div style={{ color: '#00d4f5', fontFamily: 'Sora', fontWeight: 700, fontSize: 13 }}>{uploading ? 'Parsing PDF…' : 'Upload Poolwerx Report PDF'}</div>
-              <div style={{ color: 'rgba(0,212,245,0.55)', fontSize: 11, marginTop: 2 }}>{uploading ? 'Please wait' : 'Tap to import latest test results'}</div>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg width="15" height="17" viewBox="0 0 15 17" fill="none"><path d="M2 1h7l4 4v10a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="rgba(246,245,242,0.7)" strokeWidth="1.2"/><path d="M9 1v4h4" stroke="rgba(246,245,242,0.7)" strokeWidth="1.2"/></svg>
             </div>
-            <div style={{ marginLeft: 'auto', color: 'rgba(0,212,245,0.5)', fontSize: 16 }}>›</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: 'var(--hero-fg)', fontFamily: 'Geist', fontWeight: 500, fontSize: 13.5, letterSpacing: '-0.005em' }}>{uploading ? 'Parsing PDF…' : 'Upload Poolwerx Report'}</div>
+              <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 11.5, marginTop: 2 }}>{uploading ? 'Please wait' : 'Tap to import latest test results'}</div>
+            </div>
+            <div style={{ marginLeft: 'auto', color: 'rgba(246,245,242,0.4)', fontSize: 18, lineHeight: 1 }}>→</div>
           </div>
         </div>
       </div>
 
       {/* Pills */}
-      <div className="pills-row" style={{ marginTop: 8 }}>
+      <div className="pills-row">
         {hasTest ? [
           { label: 'pH ' + testData.metrics[0].val, cls: pillCls(testData.metrics[0].status) },
           { label: 'Cl ' + testData.metrics[1].val, cls: pillCls(testData.metrics[1].status) },
-          { label: 'Salt ' + (testData.metrics[3].status === 'ok' ? '✓' : testData.metrics[3].val), cls: pillCls(testData.metrics[3].status) },
+          { label: 'Salt ' + (testData.metrics[3].status === 'ok' ? 'OK' : testData.metrics[3].val), cls: pillCls(testData.metrics[3].status) },
           { label: badCount + ' issue' + (badCount !== 1 ? 's' : ''), cls: badCount > 0 ? 'pill-bad' : 'pill-ok' },
         ].map((p, i) => (
-          <div key={i} className={`pill ${p.cls}`} onClick={() => onNav('chemistry')}>{p.label}</div>
-        )) : <div style={{ color: '#b0bac8', fontSize: 12, padding: '6px 4px' }}>Results will appear here after upload</div>}
+          <div key={i} className={`pill ${p.cls} t-num`} onClick={() => onNav('chemistry')}>{p.label}</div>
+        )) : <div style={{ color: 'var(--muted)', fontSize: 12, padding: '4px 4px' }}>Results will appear here after upload</div>}
       </div>
 
       {/* pH Trend */}
       <div className="sec-head">
-        <span>pH Trend — 6 months</span>
-        {hasTest && <a onClick={() => onNav('chemistry')}>All metrics ›</a>}
+        <span>pH Trend · 6 months</span>
+        {hasTest && <a onClick={() => onNav('chemistry')}>All metrics →</a>}
       </div>
       {hasTest ? (
       <div className="chart-card fade-up">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 14 }}>
           <div>
-            <div className="t-label" style={{ color: '#b0bac8' }}>Current pH</div>
-            <div className="t-display" style={{ fontSize: 28, color: ph.status === 'ok' ? '#1a7a47' : '#e74c3c', lineHeight: 1 }}>{ph.val}</div>
+            <div className="t-label" style={{ marginBottom: 4 }}>Current pH</div>
+            <div className="t-display t-num" style={{ fontSize: 34, color: 'var(--ink)', lineHeight: 1 }}>{ph.val}</div>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ background: ph.status === 'ok' ? '#e3f5ec' : '#fde8e8', color: ph.status === 'ok' ? '#1a7a47' : '#c0392b', padding: '4px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>{ph.status === 'ok' ? 'In range' : 'Out of range'}</div>
-            <div style={{ color: '#b0bac8', fontSize: 11, marginTop: 4 }}>Target {ph.lo} – {ph.hi}</div>
+          <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
+            <span className={`badge ${ph.status === 'ok' ? 'badge-ok' : 'badge-bad'}`}>{ph.status === 'ok' ? 'In range' : 'Out of range'}</span>
+            <div style={{ color: 'var(--muted)', fontSize: 11.5 }}>Target <span className="t-num">{ph.lo}–{ph.hi}</span></div>
           </div>
         </div>
         <TrendChart data={phHistory || []} lo={ph.lo} hi={ph.hi} />
       </div>
       ) : (
-        <div className="chart-card" style={{ textAlign: 'center', padding: '28px 20px', color: '#b0bac8' }}>
+        <div className="chart-card" style={{ textAlign: 'center', padding: '32px 20px', color: 'var(--muted)' }}>
           <div style={{ fontSize: 13 }}>pH trend will appear after your first upload</div>
         </div>
       )}
@@ -641,24 +729,26 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
       {/* To-do */}
       <div className="sec-head">
         <span>Action list</span>
-        <span style={{ color: '#b0bac8', fontSize: 12, fontWeight: 500 }}>{hasTest ? doneCount + '/' + todos.length + ' done' : ''}</span>
+        <span style={{ color: 'var(--muted)', fontSize: 11.5, fontWeight: 400, fontFamily: 'Geist', textTransform: 'none', letterSpacing: '-0.005em' }} className="t-num">{hasTest && todos.length ? doneCount + ' / ' + todos.length + ' done' : ''}</span>
       </div>
       <div className="todo-list" style={{ paddingBottom: 100 }}>
         {!hasTest && (
-          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#b0bac8' }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📄</div>
-            <div style={{ fontFamily: 'Sora', fontWeight: 700, fontSize: 15, color: '#8a9ab0', marginBottom: 6 }}>No actions yet</div>
-            <div style={{ fontSize: 13 }}>Upload your Poolwerx PDF above and your action list will populate automatically.</div>
+          <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)' }}>
+            <div style={{ width: 44, height: 44, margin: '0 auto 14px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="18" height="20" viewBox="0 0 15 17" fill="none"><path d="M2 1h7l4 4v10a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="var(--muted)" strokeWidth="1.2"/><path d="M9 1v4h4" stroke="var(--muted)" strokeWidth="1.2"/></svg>
+            </div>
+            <div className="t-title" style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 4 }}>No actions yet</div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', maxWidth: 240, margin: '0 auto', lineHeight: 1.5 }}>Upload your Poolwerx PDF above and your action list will populate automatically.</div>
           </div>
         )}
         {todos.map((t, i) => (
           <TodoCard key={t.id} t={t} idx={i} onToggle={onToggle} onDelete={onDelete} />
         ))}
         {hasTest && todos.length > 0 && doneCount === todos.length && (
-          <div style={{ textAlign: 'center', padding: '32px 20px', color: '#1a7a47' }}>
-            <div style={{ fontSize: 36, marginBottom: 8 }}>✓</div>
-            <div style={{ fontFamily: 'Sora', fontWeight: 700, fontSize: 15, marginBottom: 4 }}>All actions done</div>
-            <div style={{ fontSize: 12, color: '#8a9ab0' }}>Great work — pool's looking sharp.</div>
+          <div style={{ textAlign: 'center', padding: '32px 20px' }}>
+            <div style={{ width: 44, height: 44, margin: '0 auto 12px', borderRadius: '50%', background: 'var(--ok-tint)', color: 'var(--ok)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>✓</div>
+            <div className="t-title" style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 4 }}>All actions done</div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Great work — pool's looking sharp.</div>
           </div>
         )}
       </div>
@@ -674,33 +764,34 @@ function Chemistry({ onNav, testData, onReupload }) {
   testData = testData || TEST;
   const hasTest = !!testData.date;
   const pct = (v, mn, mx) => Math.max(0, Math.min(1, (v - mn) / (mx - mn)));
-  const colors = { ok: '#1a7a47', bad: '#c0392b', warn: '#b05a00' };
-  const bgColors = { ok: '#e3f5ec', bad: '#fde8e8', warn: '#fef3e2' };
+  const colors = { ok: 'var(--ok)', bad: 'var(--bad)', warn: 'var(--warn)' };
+  const bgColors = { ok: 'var(--ok-tint)', bad: 'var(--bad-tint)', warn: 'var(--warn-tint)' };
 
   return (
     <div className="screen">
-      <div style={{ background: 'linear-gradient(160deg, #0b2d45, #0e4a6e)', padding: 'calc(20px + env(safe-area-inset-top, 0px)) 20px 28px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-          <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Water Chemistry</div>
+      <div className="hero">
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+            <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)' }}>Water Chemistry</div>
+            {hasTest && (
+              <button onClick={onReupload} className="chip-btn">← Re-upload</button>
+            )}
+          </div>
+          <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 22, lineHeight: 1.2 }}>{hasTest ? 'Test · ' + testData.date : 'Water Chemistry'}</div>
+          {hasTest && <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 12, marginTop: 4 }}>{testData.pool}</div>}
           {hasTest && (
-            <button onClick={onReupload} style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 600, fontFamily: 'DM Sans', cursor: 'pointer' }}>↻ Re-upload</button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+            <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '4px 11px', color: 'rgba(246,245,242,0.85)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>LSI {testData.lsi}</div>
+            <div style={{ background: 'oklch(0.32 0.09 25)', border: '1px solid oklch(0.42 0.12 25)', borderRadius: 999, padding: '4px 11px', color: 'oklch(0.85 0.12 25)', fontSize: 12, fontWeight: 400 }}>{testData.metrics.filter(m => m.status !== 'ok').length} out of range</div>
+          </div>
           )}
         </div>
-        <div className="t-display" style={{ color: '#fff', fontSize: 20 }}>{hasTest ? 'Test — ' + testData.date : 'Water Chemistry'}</div>
-        {hasTest && <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 4 }}>{testData.pool}</div>}
-        {hasTest && (
-        <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-          <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: '6px 12px', color: '#fff', fontSize: 12, fontWeight: 600 }}>LSI {testData.lsi} ✓</div>
-          <div style={{ background: 'rgba(231,76,60,0.25)', borderRadius: 10, padding: '6px 12px', color: '#ff8080', fontSize: 12, fontWeight: 600 }}>{testData.metrics.filter(m => m.status !== 'ok').length} out of range</div>
-        </div>
-        )}
       </div>
 
       {!hasTest ? (
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#b0bac8' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🧪</div>
-          <div style={{ fontFamily: 'Sora', fontWeight: 700, fontSize: 15, color: '#8a9ab0', marginBottom: 6 }}>No test data yet</div>
-          <div style={{ fontSize: 13 }}>Upload a Poolwerx PDF from the Dashboard to see your water chemistry.</div>
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--muted)' }}>
+          <div className="t-title" style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 6 }}>No test data yet</div>
+          <div style={{ fontSize: 12.5 }}>Upload a Poolwerx PDF from the Dashboard to see your water chemistry.</div>
         </div>
       ) : (
       <div style={{ paddingTop: 16, paddingBottom: 100 }}>
@@ -709,28 +800,26 @@ function Chemistry({ onNav, testData, onReupload }) {
           const hiPct = pct(m.hi, m.min, m.max) * 100;
           const valPct = m.val != null ? pct(m.val, m.min, m.max) * 100 : null;
           const col = colors[m.status];
-          const bg = bgColors[m.status];
+          const badgeCls = m.status === 'ok' ? 'badge-ok' : m.status === 'warn' ? 'badge-warn' : 'badge-bad';
 
           return (
             <div key={m.id} className="metric-card fade-up" style={{ animationDelay: `${i * 0.04}s` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <div className="t-label" style={{ color: '#8a9ab0', marginBottom: 2 }}>{m.label}</div>
-                  <div className="t-display" style={{ fontSize: 26, color: col, lineHeight: 1 }}>
-                    {m.val != null ? m.val : '—'}<span style={{ fontSize: 13, fontWeight: 500, marginLeft: 3 }}>{m.val != null ? m.unit : ''}</span>
+                  <div className="t-label" style={{ marginBottom: 4 }}>{m.label}</div>
+                  <div className="t-display t-num" style={{ fontSize: 28, color: 'var(--ink)', lineHeight: 1 }}>
+                    {m.val != null ? m.val : '—'}<span style={{ fontSize: 13, fontWeight: 400, marginLeft: 4, color: 'var(--muted)' }}>{m.val != null ? m.unit : ''}</span>
                   </div>
                 </div>
-                <div style={{ background: bg, color: col, padding: '4px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700, marginTop: 2 }}>
-                  {m.status === 'ok' ? 'In range' : m.status === 'warn' ? 'Low' : 'Out of range'}
-                </div>
+                <span className={`badge ${badgeCls}`}>{m.status === 'ok' ? 'In range' : m.status === 'warn' ? 'Borderline' : 'Out of range'}</span>
               </div>
               <div className="range-track">
                 <div className="range-zone" style={{ left: `${loPct}%`, width: `${hiPct - loPct}%` }} />
                 {valPct != null && <div className="range-marker" style={{ left: `${valPct}%`, background: col }} />}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#b0bac8', fontSize: 10, fontWeight: 500 }}>
+              <div className="t-num" style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--faint)', fontSize: 10.5, fontWeight: 400, fontFamily: 'Geist Mono, ui-monospace, monospace' }}>
                 <span>{m.min}</span>
-                <span style={{ color: '#00b4d8', fontWeight: 600 }}>target {m.lo}–{m.hi}</span>
+                <span style={{ color: 'var(--muted)' }}>target {m.lo}–{m.hi}</span>
                 <span>{m.max}</span>
               </div>
             </div>
@@ -804,19 +893,22 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
 
   return (
     <div className="screen" onClick={() => { setShowChemPicker(false); setShowUnitPicker(false); }}>
-      <div style={{ background: 'linear-gradient(160deg, #0b2d45, #0e4a6e)', padding: 'calc(20px + env(safe-area-inset-top, 0px)) 20px 28px' }}>
-        <div className="t-display" style={{ color: '#fff', fontSize: 24, lineHeight: 1.1 }}>Log Activity</div>
-        <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, marginTop: 6 }}>Record doses, maintenance & notes</div>
+      <div className="hero">
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)', marginBottom: 8 }}>Log Activity</div>
+          <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15 }}>What happened?</div>
+          <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 12.5, marginTop: 6 }}>Record doses, maintenance &amp; notes</div>
+        </div>
       </div>
 
       {/* Type selector */}
-      <div className="sec-head" style={{ marginTop: 12 }}><span>What are you logging?</span></div>
+      <div className="sec-head" style={{ marginTop: 4 }}><span>What are you logging?</span></div>
       <div className="quick-row">
         {typeButtons.map(b => (
           <div key={b.id} className="quick-btn"
-            style={{ background: logType === b.id ? '#e8f6fb' : '#fff', border: logType === b.id ? '2px solid #00b4d8' : '2px solid transparent', borderRadius: 14 }}
+            style={{ background: logType === b.id ? 'var(--ink)' : 'var(--surface)', borderColor: logType === b.id ? 'var(--ink)' : 'var(--hairline)', color: logType === b.id ? '#fff' : 'var(--ink-2)' }}
             onClick={e => { e.stopPropagation(); setLogType(b.id); }}>
-            <div className="icon">{b.icon}</div>
+            <div className="icon" style={{ opacity: logType === b.id ? 1 : 0.85 }}>{b.icon}</div>
             {b.label}
           </div>
         ))}
@@ -835,9 +927,9 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
             </div>
           </div>
           {showChemPicker && (
-            <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', borderRadius: 14, boxShadow: '0 8px 32px rgba(0,0,0,0.15)', zIndex: 100, overflow: 'hidden' }}>
+            <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: '0 12px 32px rgba(12,12,13,0.10)', zIndex: 100, overflow: 'hidden' }}>
               {chemicals.map(c => (
-                <div key={c} style={{ padding: '13px 16px', borderBottom: '1px solid #f0f2f5', cursor: 'pointer', fontFamily: 'Sora', fontSize: 14, fontWeight: c === chemical ? 700 : 400, color: c === chemical ? '#00b4d8' : '#0b1f2e', background: c === chemical ? '#f0fbff' : '#fff' }}
+                <div key={c} style={{ padding: '12px 14px', borderBottom: '1px solid var(--hairline-2)', cursor: 'pointer', fontFamily: 'Geist', fontSize: 14, fontWeight: c === chemical ? 500 : 400, color: c === chemical ? 'var(--accent)' : 'var(--ink)', background: c === chemical ? 'var(--accent-tint)' : 'transparent', letterSpacing: '-0.005em' }}
                   onClick={() => { setChemical(c); setShowChemPicker(false); }}>
                   {c}
                 </div>
@@ -862,9 +954,9 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
               </div>
             </div>
             {showUnitPicker && (
-              <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', borderRadius: 14, boxShadow: '0 8px 32px rgba(0,0,0,0.15)', zIndex: 100, overflow: 'hidden' }}>
+              <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: '0 12px 32px rgba(12,12,13,0.10)', zIndex: 100, overflow: 'hidden' }}>
                 {units.map(u => (
-                  <div key={u} style={{ padding: '12px 16px', borderBottom: '1px solid #f0f2f5', cursor: 'pointer', fontFamily: 'Sora', fontSize: 14, fontWeight: u === unit ? 700 : 400, color: u === unit ? '#00b4d8' : '#0b1f2e' }}
+                  <div key={u} style={{ padding: '11px 14px', borderBottom: '1px solid var(--hairline-2)', cursor: 'pointer', fontFamily: 'Geist', fontSize: 14, fontWeight: u === unit ? 500 : 400, color: u === unit ? 'var(--accent)' : 'var(--ink)', background: u === unit ? 'var(--accent-tint)' : 'transparent', letterSpacing: '-0.005em' }}
                     onClick={() => { setUnit(u); setShowUnitPicker(false); }}>
                     {u}
                   </div>
@@ -875,9 +967,9 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
         </div>
 
         <div className="form-field">
-          <div className="form-label">Date & Time</div>
+          <div className="form-label">Date &amp; Time</div>
           <input type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
-            style={{ fontFamily: 'DM Sans', fontSize: 14, color: '#0b1f2e', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+            style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
         </div>
       </div>
       )}
@@ -886,14 +978,14 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
       {(logType === 'backwash' || logType === 'aiper') && (
         <div className="log-form">
           <div className="form-field">
-            <div className="form-label">Date & Time</div>
+            <div className="form-label">Date &amp; Time</div>
             <input type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
-              style={{ fontFamily: 'DM Sans', fontSize: 14, color: '#0b1f2e', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+              style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
           <div className="form-field">
             <div className="form-label">Notes (optional)</div>
             <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. filter clean, good flow"
-              style={{ fontFamily: 'DM Sans', fontSize: 14, color: '#0b1f2e', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+              style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
         </div>
       )}
@@ -904,24 +996,24 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
           <div className="form-field">
             <div className="form-label">Note</div>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="What did you observe?"
-              rows={3} style={{ fontFamily: 'DM Sans', fontSize: 14, color: '#0b1f2e', border: 'none', background: 'none', outline: 'none', width: '100%', resize: 'none' }} />
+              rows={3} style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%', resize: 'none', lineHeight: 1.5 }} />
           </div>
           <div className="form-field">
-            <div className="form-label">Date & Time</div>
+            <div className="form-label">Date &amp; Time</div>
             <input type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
-              style={{ fontFamily: 'DM Sans', fontSize: 14, color: '#0b1f2e', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+              style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
         </div>
       )}
 
-      <div style={{ padding: '0 16px' }}>
+      <div style={{ padding: '8px 14px 0' }}>
         {errMsg && (
-          <div style={{ background: '#fde8e8', color: '#c0392b', padding: '10px 14px', borderRadius: 12, fontSize: 12, fontWeight: 600, marginBottom: 10 }}>
+          <div style={{ background: 'var(--bad-tint)', color: 'var(--bad)', padding: '10px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 500, marginBottom: 10, border: '1px solid oklch(0.92 0.04 25)' }}>
             {errMsg}
           </div>
         )}
         <button className="btn-primary" style={{ marginBottom: 16 }} onClick={handleSave}>
-          {saved ? '✓ Saved!' : 'Save Log Entry'}
+          {saved ? '✓ Saved' : 'Save log entry'}
         </button>
       </div>
 
@@ -929,20 +1021,20 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
       {pending.length > 0 && (
         <>
           <div className="sec-head"><span>Mark Poolwerx doses done</span></div>
-          <div style={{ padding: '0 16px', paddingBottom: 100 }}>
-            <div style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
-              <div style={{ padding: '10px 16px', background: '#f8fbff', borderBottom: '1px solid #eef0f5', color: '#8a9ab0', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                From test {testData.date}
+          <div style={{ padding: '0 14px', paddingBottom: 100 }}>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14, overflow: 'hidden' }}>
+              <div className="t-label" style={{ padding: '12px 16px 10px', background: 'var(--surface-2)', borderBottom: '1px solid var(--hairline)' }}>
+                From test · {testData.date}
               </div>
               {pending.map((t, i) => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: i < pending.length - 1 ? '1px solid #f0f2f5' : 'none', cursor: 'pointer' }}
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: i < pending.length - 1 ? '1px solid var(--hairline-2)' : 'none', cursor: 'pointer' }}
                   onClick={() => onToggle(t.id)}>
-                  <div className="todo-check" style={{ minWidth: 26 }}></div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: 'Sora', fontSize: 13, fontWeight: 600, color: '#0b1f2e' }}>{t.label}</div>
-                    <div style={{ color: '#8a9ab0', fontSize: 11, marginTop: 1 }}>{t.reason}</div>
+                  <div className="todo-check" style={{ minWidth: 22 }}></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: 'Geist', fontSize: 13, fontWeight: 500, color: 'var(--ink)', letterSpacing: '-0.005em' }}>{t.label}</div>
+                    <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 2 }}>{t.reason}</div>
                   </div>
-                  <div style={{ background: `${t.color}18`, color: t.color, padding: '2px 8px', borderRadius: 8, fontSize: 10, fontWeight: 700 }}>{t.pri}</div>
+                  <div style={{ fontFamily: 'Geist Mono, ui-monospace, monospace', color: t.color, fontSize: 9.5, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{t.pri}</div>
                 </div>
               ))}
             </div>
@@ -966,41 +1058,43 @@ function History({ onNav, entries: userEntries, onExport, onImport }) {
   return (
     <div className="screen">
       <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handlePick} />
-      <div style={{ background: 'linear-gradient(160deg, #0b2d45, #0e4a6e)', padding: 'calc(20px + env(safe-area-inset-top, 0px)) 20px 28px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="t-display" style={{ color: '#fff', fontSize: 24, lineHeight: 1.1 }}>History</div>
-            <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, marginTop: 6 }}>Activity log & test history</div>
+      <div className="hero">
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)', marginBottom: 8 }}>History</div>
+              <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15 }}>Activity log</div>
+              <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 12.5, marginTop: 6 }}>Doses, runs, observations</div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              <button onClick={onExport} className="chip-btn">↓ Export</button>
+              <button onClick={() => fileRef.current && fileRef.current.click()} className="chip-btn">↑ Import</button>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-            <button onClick={onExport} style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 999, padding: '6px 12px', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', cursor: 'pointer' }}>↓ Export</button>
-            <button onClick={() => fileRef.current && fileRef.current.click()} style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 999, padding: '6px 12px', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', cursor: 'pointer' }}>↑ Import</button>
+          <div style={{ color: 'rgba(246,245,242,0.4)', fontSize: 10.5, marginTop: 12, lineHeight: 1.5 }}>
+            Backup or move your data between browsers/devices. Imports replace current data.
           </div>
-        </div>
-        <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, marginTop: 10, lineHeight: 1.5 }}>
-          Backup or move your data between browsers/devices. Imports replace current data.
         </div>
       </div>
 
-      <div style={{ padding: '16px 16px 100px' }}>
+      <div style={{ padding: '16px 14px 100px' }}>
         {entries.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#b0bac8' }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
-            <div style={{ fontFamily: 'Sora', fontWeight: 700, fontSize: 15, color: '#8a9ab0', marginBottom: 6 }}>No activity yet</div>
-            <div style={{ fontSize: 13 }}>Log a dose, backwash or Aiper run and it will appear here.</div>
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--muted)' }}>
+            <div className="t-title" style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 6 }}>No activity yet</div>
+            <div style={{ fontSize: 12.5 }}>Log a dose, backwash or Aiper run and it will appear here.</div>
           </div>
         ) : (
-        <div style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14, overflow: 'hidden' }}>
           {entries.map((e, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderBottom: i < entries.length - 1 ? '1px solid #f0f2f5' : 'none' }}>
-              <div style={{ width: 40, height: 40, borderRadius: 12, background: '#f4f6f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderBottom: i < entries.length - 1 ? '1px solid var(--hairline-2)' : 'none' }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--hairline-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
                 {e.icon}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: 'Sora', fontSize: 13, fontWeight: 600, color: '#0b1f2e', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.type}</div>
-                {e.note && <div style={{ color: '#8a9ab0', fontSize: 11, marginTop: 2 }}>{e.note}</div>}
+                <div style={{ fontFamily: 'Geist', fontSize: 13.5, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: '-0.005em' }}>{e.type}</div>
+                {e.note && <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 2 }}>{e.note}</div>}
               </div>
-              <div style={{ color: '#b0bac8', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{e.date}</div>
+              <div className="t-num" style={{ color: 'var(--faint)', fontSize: 11, fontWeight: 400, flexShrink: 0, fontFamily: 'Geist Mono, ui-monospace, monospace' }}>{e.date}</div>
             </div>
           ))}
         </div>
@@ -1106,7 +1200,7 @@ function App() {
             pri: status === 'bad' ? 'HIGH' : 'MED',
             label: r.action,
             reason: metric ? (metric.label + ' is ' + metric.val + ' · target ' + metric.lo + '–' + metric.hi + ' ' + metric.unit) : r.param,
-            color: status === 'bad' ? '#e74c3c' : '#e07b39',
+          color: status === 'bad' ? 'oklch(0.55 0.19 25)' : 'oklch(0.62 0.14 70)',
             done: false,
           };
         });
@@ -1116,7 +1210,7 @@ function App() {
           id: i + 1, pri: m.status === 'bad' ? 'HIGH' : 'MED',
           label: m.label + ' out of range',
           reason: m.label + ' is ' + m.val + ' · target ' + m.lo + '–' + m.hi + ' ' + m.unit,
-          color: m.status === 'bad' ? '#e74c3c' : '#e07b39', done: false,
+          color: m.status === 'bad' ? 'oklch(0.55 0.19 25)' : 'oklch(0.62 0.14 70)', done: false,
         }));
       }
       setTodos(newTodos);
