@@ -185,33 +185,33 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5 }) {
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible', display: 'block' }}>
       {/* Target band */}
-      <rect x={pad.l} y={bandTop} width={cW} height={bandH} fill="oklch(0.52 0.16 252)" opacity={0.08} rx={2} />
-      <line x1={pad.l} y1={loY} x2={pad.l + cW} y2={loY} stroke="oklch(0.52 0.16 252)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
-      <line x1={pad.l} y1={hiY} x2={pad.l + cW} y2={hiY} stroke="oklch(0.52 0.16 252)" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
+      <rect x={pad.l} y={bandTop} width={cW} height={bandH} fill="#087299" opacity={0.08} rx={2} />
+      <line x1={pad.l} y1={loY} x2={pad.l + cW} y2={loY} stroke="#087299" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
+      <line x1={pad.l} y1={hiY} x2={pad.l + cW} y2={hiY} stroke="#087299" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
 
       {/* Area fill */}
       <defs>
         <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#0c0c0d" stopOpacity="0.10" />
-          <stop offset="100%" stopColor="#0c0c0d" stopOpacity="0" />
+          <stop offset="0%" stopColor="#0c1a22" stopOpacity="0.10" />
+          <stop offset="100%" stopColor="#0c1a22" stopOpacity="0" />
         </linearGradient>
       </defs>
       <path d={areaD} fill="url(#areaGrad)" />
 
       {/* Line */}
-      <path d={pathD} fill="none" stroke="#0c0c0d" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={pathD} fill="none" stroke="#0c1a22" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
 
       {/* Points */}
       {data.map((d, i) => (
         <circle key={i} cx={px(i)} cy={py(d.val)} r={i === data.length - 1 ? 4.5 : 3}
-          fill={d.val >= lo && d.val <= hi ? 'oklch(0.50 0.12 155)' : 'oklch(0.55 0.19 25)'}
+          fill={d.val >= lo && d.val <= hi ? '#0f7852' : '#c62436'}
           stroke="#fff" strokeWidth={1.5} />
       ))}
 
       {/* X labels */}
       {data.map((d, i) => (
         <text key={i} x={px(i)} y={H - 2} textAnchor="middle"
-          style={{ fontSize: 9, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#a4a4a8', fontWeight: 500, letterSpacing: '0.02em' }}>
+          style={{ fontSize: 9, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#8ea1a9', fontWeight: 500, letterSpacing: '0.02em' }}>
           {d.label}
         </text>
       ))}
@@ -219,14 +219,14 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5 }) {
       {/* Y labels */}
       {ticks.map((v, i) => (
         <text key={i} x={pad.l - 4} y={py(v) + 3} textAnchor="end"
-          style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#c4c4c8' }}>
+          style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#bccad0' }}>
           {v.toFixed(1)}
         </text>
       ))}
 
       {/* Target label */}
       <text x={pad.l + cW} y={Math.min(loY, hiY) - 4} textAnchor="end"
-        style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: 'oklch(0.52 0.16 252)', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+        style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#087299', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
         target
       </text>
     </svg>
@@ -322,7 +322,7 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)', marginBottom: 8 }}>{hasTest ? 'Last tested · ' + testData.date : 'No test data yet'}</div>
+              <div className="t-label" style={{ color: 'rgba(234,246,251,0.5)', marginBottom: 8 }}>{hasTest ? 'Last tested · ' + testData.date : 'No test data yet'}</div>
               <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 26, lineHeight: 1.15 }}>
                 {hasTest ? (openCount === 0 ? 'All caught up.' : (openCount === 1 ? '1 thing needs attention.' : openCount + ' things need attention.')) : 'Upload a report to get started.'}
               </div>
@@ -336,10 +336,10 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
             )}
           </div>
           {hasTest && (
-            <div style={{ display: 'flex', gap: 18, color: 'rgba(246,245,242,0.55)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>
-              {testData.lsi != null && <span><span style={{ color: 'rgba(246,245,242,0.4)' }}>LSI </span>{testData.lsi}</span>}
-              <span><span style={{ color: 'rgba(246,245,242,0.4)' }}>Salt </span>{testData.metrics[3].status === 'ok' ? 'OK' : testData.metrics[3].val}</span>
-              <span><span style={{ color: 'rgba(246,245,242,0.4)' }}>Chlorine </span>{testData.metrics[1].status === 'ok' ? 'OK' : testData.metrics[1].val}</span>
+            <div style={{ display: 'flex', gap: 18, color: 'rgba(234,246,251,0.55)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>
+              {testData.lsi != null && <span><span style={{ color: 'rgba(234,246,251,0.4)' }}>LSI </span>{testData.lsi}</span>}
+              <span><span style={{ color: 'rgba(234,246,251,0.4)' }}>Salt </span>{testData.metrics[3].status === 'ok' ? 'OK' : testData.metrics[3].val}</span>
+              <span><span style={{ color: 'rgba(234,246,251,0.4)' }}>Chlorine </span>{testData.metrics[1].status === 'ok' ? 'OK' : testData.metrics[1].val}</span>
             </div>
           )}
 
@@ -348,13 +348,13 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
           <div className="upload-zone" style={{ marginTop: 18, opacity: uploading ? 0.6 : 1 }}
             onClick={onUpload}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="15" height="17" viewBox="0 0 15 17" fill="none"><path d="M2 1h7l4 4v10a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="rgba(246,245,242,0.7)" strokeWidth="1.2"/><path d="M9 1v4h4" stroke="rgba(246,245,242,0.7)" strokeWidth="1.2"/></svg>
+              <svg width="15" height="17" viewBox="0 0 15 17" fill="none"><path d="M2 1h7l4 4v10a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="rgba(234,246,251,0.7)" strokeWidth="1.2"/><path d="M9 1v4h4" stroke="rgba(234,246,251,0.7)" strokeWidth="1.2"/></svg>
             </div>
             <div style={{ minWidth: 0 }}>
               <div style={{ color: 'var(--hero-fg)', fontFamily: 'Geist', fontWeight: 500, fontSize: 13.5, letterSpacing: '-0.005em' }}>{uploading ? 'Parsing PDF…' : 'Upload Poolwerx Report'}</div>
-              <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 11.5, marginTop: 2 }}>{uploading ? 'Please wait' : 'Tap to import latest test results'}</div>
+              <div style={{ color: 'rgba(234,246,251,0.5)', fontSize: 11.5, marginTop: 2 }}>{uploading ? 'Please wait' : 'Tap to import latest test results'}</div>
             </div>
-            <div style={{ marginLeft: 'auto', color: 'rgba(246,245,242,0.4)', fontSize: 18, lineHeight: 1 }}>→</div>
+            <div style={{ marginLeft: 'auto', color: 'rgba(234,246,251,0.4)', fontSize: 18, lineHeight: 1 }}>→</div>
           </div>
           }
         </div>
@@ -444,7 +444,7 @@ function Chemistry({ onNav, testData, onReupload }) {
       <div className="hero">
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-            <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)' }}>Water Chemistry</div>
+            <div className="t-label" style={{ color: 'rgba(234,246,251,0.5)' }}>Water Chemistry</div>
             {hasTest && (
               <button onClick={onReupload} className="chip-btn" aria-label="Upload a new Poolwerx test PDF"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -453,11 +453,11 @@ function Chemistry({ onNav, testData, onReupload }) {
             )}
           </div>
           <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 22, lineHeight: 1.2 }}>{hasTest ? 'Test · ' + testData.date : 'Water Chemistry'}</div>
-          {hasTest && <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 12, marginTop: 4 }}>{testData.pool}</div>}
+          {hasTest && <div style={{ color: 'rgba(234,246,251,0.5)', fontSize: 12, marginTop: 4 }}>{testData.pool}</div>}
           {hasTest && (
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '4px 11px', color: 'rgba(246,245,242,0.85)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>LSI {testData.lsi}</div>
-            <div style={{ background: 'oklch(0.32 0.09 25)', border: '1px solid oklch(0.42 0.12 25)', borderRadius: 999, padding: '4px 11px', color: 'oklch(0.85 0.12 25)', fontSize: 12, fontWeight: 400 }}>{testData.metrics.filter(m => m.status !== 'ok').length} out of range</div>
+            <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '4px 11px', color: 'rgba(234,246,251,0.85)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>LSI {testData.lsi}</div>
+            <div style={{ background: 'rgba(198,36,54,0.22)', border: '1px solid rgba(198,36,54,0.45)', borderRadius: 999, padding: '4px 11px', color: '#ffc4c4', fontSize: 12, fontWeight: 400 }}>{testData.metrics.filter(m => m.status !== 'ok').length} out of range</div>
           </div>
           )}
         </div>
@@ -571,9 +571,9 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
     <div className="screen" onClick={() => { setShowChemPicker(false); setShowUnitPicker(false); }}>
       <div className="hero">
         <div style={{ position: 'relative', zIndex: 1 }}>
-          <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)', marginBottom: 8 }}>Log Activity</div>
+          <div className="t-label" style={{ color: 'rgba(234,246,251,0.5)', marginBottom: 8 }}>Log Activity</div>
           <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15 }}>What happened?</div>
-          <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 12.5, marginTop: 6 }}>Record doses, maintenance &amp; notes</div>
+          <div style={{ color: 'rgba(234,246,251,0.5)', fontSize: 12.5, marginTop: 6 }}>Record doses, maintenance &amp; notes</div>
         </div>
       </div>
 
@@ -684,7 +684,7 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
 
       <div style={{ padding: '8px 14px 0' }}>
         {errMsg && (
-          <div style={{ background: 'var(--bad-tint)', color: 'var(--bad)', padding: '10px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 500, marginBottom: 10, border: '1px solid oklch(0.92 0.04 25)' }}>
+          <div style={{ background: 'var(--bad-tint)', color: 'var(--bad)', padding: '10px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 500, marginBottom: 10, border: '1px solid #f4cdd2' }}>
             {errMsg}
           </div>
         )}
@@ -738,9 +738,9 @@ function History({ onNav, entries: userEntries, onExport, onImport }) {
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)', marginBottom: 8 }}>History</div>
+              <div className="t-label" style={{ color: 'rgba(234,246,251,0.5)', marginBottom: 8 }}>History</div>
               <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15 }}>Activity log</div>
-              <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 12.5, marginTop: 6 }}>Doses, runs, observations</div>
+              <div style={{ color: 'rgba(234,246,251,0.5)', fontSize: 12.5, marginTop: 6 }}>Doses, runs, observations</div>
             </div>
             <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
               <button onClick={onExport} className="chip-btn">↓ Export</button>
@@ -988,7 +988,7 @@ function App() {
             pri: status === 'bad' ? 'HIGH' : 'MED',
             label: normalizeDose(r.action),
             reason: metric ? (metric.label + ' is ' + metric.val + ' · target ' + metric.lo + '–' + metric.hi + ' ' + metric.unit) : r.param,
-          color: status === 'bad' ? 'oklch(0.55 0.19 25)' : 'oklch(0.62 0.14 70)',
+          color: status === 'bad' ? '#c62436' : '#a15c00',
             done: false,
           };
         });
@@ -998,7 +998,7 @@ function App() {
           id: i + 1, pri: m.status === 'bad' ? 'HIGH' : 'MED',
           label: m.label + ' out of range',
           reason: m.label + ' is ' + m.val + ' · target ' + m.lo + '–' + m.hi + ' ' + m.unit,
-          color: m.status === 'bad' ? 'oklch(0.55 0.19 25)' : 'oklch(0.62 0.14 70)', done: false,
+          color: m.status === 'bad' ? '#c62436' : '#a15c00', done: false,
         }));
       }
       setTodos(newTodos);

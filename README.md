@@ -24,18 +24,19 @@ step: any static file server runs the app, e.g.
 python3 -m http.server 8000
 ```
 
-## Design system (v4)
+## Design system (v4 · "Deep Lagoon")
 
-Warm paper surfaces, a flat ink hero, one cobalt accent, hairline borders, no
-shadows or gradients. Geist for text, Geist Mono for uppercase labels and
-numbers (tabular). Icons are a single inline-SVG stroke family (1.5px,
-`currentColor`) — no emoji.
+Cool chalky off-white surfaces, a deep teal-navy hero, one clean-water cyan
+accent, hairline borders, no shadows or gradients. Geist for text, Geist Mono
+for uppercase labels and numbers (tabular). Icons are a single inline-SVG
+stroke family (1.5px, `currentColor`) — no emoji.
 
 ```css
---bg: #f6f5f2;      /* page */          --ink: #0c0c0d;   /* text, hero */
---accent: oklch(0.52 0.16 252);         /* cobalt — the only accent */
---bad: oklch(0.55 0.19 25);  --warn: oklch(0.62 0.14 70);  --ok: oklch(0.50 0.12 155);
---hairline: #e8e6df;                    /* 1px borders everywhere */
+--bg: #eef5f8;       /* cool page */      --ink: #0c1a22;    /* text */
+--accent: #087299;                        /* clean-water cyan — the only accent */
+--bad: #c62436;  --warn: #a15c00;  --ok: #0f7852;   /* status */
+--hairline: #dbe6ea;                      /* 1px borders everywhere */
+--hero-bg: #0a2a3a;                        /* deep-water teal-navy hero */
 ```
 
 The full token set lives in the `:root` block of `styles.css`. Keep new UI on

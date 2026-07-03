@@ -1,31 +1,31 @@
 :root {
-  /* Surfaces */
-  --bg:        #f6f5f2;        /* warm neutral page bg */
+  /* Surfaces — cool chalky off-white (Deep Lagoon) */
+  --bg:        #eef5f8;        /* faint cool-water tint, not warm paper */
   --surface:   #ffffff;
-  --surface-2: #faf9f6;        /* subtle alt surface */
-  --ink:       #0c0c0d;        /* near-black, warm */
-  --ink-2:     #2a2a2c;
-  --muted:     #6b6b70;
-  --faint:     #a4a4a8;
-  --hairline:  #e8e6df;        /* 1px borders, no shadows */
-  --hairline-2:#f0eee8;
+  --surface-2: #f5fafc;        /* subtle cool alt surface */
+  --ink:       #0c1a22;        /* near-black, teal undertone */
+  --ink-2:     #24343c;
+  --muted:     #52646d;
+  --faint:     #82949c;
+  --hairline:  #dbe6ea;        /* 1px borders, no shadows */
+  --hairline-2:#e6eef1;
 
-  /* Accent — single deep cobalt; everything that says "primary" uses this */
-  --accent:    oklch(0.52 0.16 252);
-  --accent-2:  oklch(0.46 0.17 252);
-  --accent-tint: oklch(0.96 0.025 252);
+  /* Accent — clean pool-water cyan; everything that says "primary" uses this */
+  --accent:    #087299;
+  --accent-2:  #06617f;
+  --accent-tint: #e9f5fb;
 
-  /* Status — saturated, not pastel */
-  --bad:       oklch(0.55 0.19 25);
-  --bad-tint:  oklch(0.965 0.022 25);
-  --warn:      oklch(0.62 0.14 70);
-  --warn-tint: oklch(0.965 0.025 70);
-  --ok:        oklch(0.50 0.12 155);
-  --ok-tint:   oklch(0.965 0.025 155);
+  /* Status — crisp, saturated, not muddy */
+  --bad:       #c62436;
+  --bad-tint:  #fce8ea;
+  --warn:      #a15c00;
+  --warn-tint: #fdf0de;
+  --ok:        #0f7852;
+  --ok-tint:   #e3f5ee;
 
-  /* Hero ink-block */
-  --hero-bg:   #0c0c0d;
-  --hero-fg:   #f6f5f2;
+  /* Hero — deep-water teal-navy slab */
+  --hero-bg:   #0a2a3a;
+  --hero-fg:   #eaf6fb;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -79,8 +79,9 @@ body {
   /* very subtle dotted texture, low contrast */
   content: '';
   position: absolute; inset: 0;
-  background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
-  background-size: 14px 14px;
+  background-image: radial-gradient(rgba(180,225,240,0.045) 1px, transparent 1px);
+  background-size: 15px 15px;
+  opacity: 0.9;
   pointer-events: none;
 }
 
@@ -168,7 +169,7 @@ body {
   position: relative;
   overflow: hidden;
 }
-.todo-card:hover { border-color: #ddd9ce; }
+.todo-card:hover { border-color: #c7d6dc; }
 .todo-card.done { opacity: 0.5; }
 .todo-card:active { transform: scale(0.99); }
 .todo-accent {
@@ -180,13 +181,13 @@ body {
 .todo-check {
   width: 22px; height: 22px; min-width: 22px;
   border-radius: 999px;
-  border: 1.5px solid #cdcabf;
+  border: 1.5px solid #bcccd1;
   display: flex; align-items: center; justify-content: center;
   margin-top: 1px;
   transition: background 0.2s, border-color 0.2s;
   font-size: 12px;
 }
-.todo-check.checked { background: var(--ink); border-color: var(--ink); color: #fff; }
+.todo-check.checked { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 /* ── Chemistry range bars ── */
 .metric-card {
@@ -200,7 +201,7 @@ body {
   height: 4px; border-radius: 2px; background: var(--hairline-2);
   position: relative; margin: 14px 0 8px;
 }
-.range-zone { position: absolute; height: 100%; border-radius: 2px; background: oklch(0.85 0.07 155); }
+.range-zone { position: absolute; height: 100%; border-radius: 2px; background: #bfe8d5; }
 .range-marker {
   position: absolute; top: -5px;
   width: 14px; height: 14px;
@@ -239,7 +240,7 @@ body {
   font-size: 11.5px; font-weight: 500; color: var(--ink-2); text-align: center;
   letter-spacing: -0.005em;
 }
-.quick-btn:hover { border-color: #ddd9ce; }
+.quick-btn:hover { border-color: #c7d6dc; }
 .quick-btn:active { transform: scale(0.97); }
 .quick-btn .icon { font-size: 18px; line-height: 1; opacity: 0.85; }
 
@@ -284,7 +285,7 @@ body {
   cursor: pointer;
   transition: transform 0.15s, background 0.18s;
 }
-.btn-primary:hover  { background: #1d1d20; }
+.btn-primary:hover  { background: #17323d; }
 .btn-primary:active { transform: scale(0.98); }
 
 /* ── Header chip button (re-upload, export) ── */
@@ -323,7 +324,7 @@ body {
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
 .toast-action {
   background: none; border: none;
-  color: oklch(0.75 0.11 252);
+  color: #78d0e2;
   font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
   font-size: 13px; font-weight: 600;
   letter-spacing: -0.005em;
