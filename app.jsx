@@ -806,6 +806,64 @@ function groupEntriesByMonth(entries) {
   return groups;
 }
 
+// ─── Reminders toggle (Routines screen) ──────────
+// Self-contained: talks to window.PoolNotify. Hidden entirely on browsers that
+// don't support notifications/service workers.
+function ReminderToggle() {
+  const [state, setState] = React.useState('loading'); // loading|off|on|denied|unsupported
+  const [bg, setBg] = React.useState(false);           // background sync granted?
+
+  React.useEffect(() => {
+    let alive = true;
+    const PN = window.PoolNotify;
+    if (!PN || !PN.supported()) { setState('unsupported'); return; }
+    if (PN.permission() === 'denied') { setState('denied'); return; }
+    PN.isEnabled().then(on => { if (alive) setState(on ? 'on' : 'off'); });
+    return () => { alive = false; };
+  }, []);
+
+  const toggle = async () => {
+    const PN = window.PoolNotify;
+    if (!PN || state === 'loading') return;
+    if (state === 'on') { await PN.disable(); setState('off'); setBg(false); return; }
+    setState('loading');
+    const res = await PN.enable();
+    if (res.ok) { setState('on'); setBg(!!res.background); }
+    else setState(res.permission === 'denied' ? 'denied' : 'off');
+  };
+
+  if (state === 'unsupported') return null;
+
+  const on = state === 'on';
+  const denied = state === 'denied';
+  const sub = denied
+    ? 'Blocked — allow notifications for this site in your browser settings, then reload.'
+    : on
+      ? (bg
+          ? "On — you'll be reminded when a task is due, even when the app is closed."
+          : 'On — reminders show while the app is open. Add it to your home screen for background reminders.')
+      : 'Get a notification when a task becomes due, or when a new test adds actions.';
+
+  return (
+    <div className="card" style={{ padding: '14px 16px', marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
+      <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--hairline-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: on ? 'var(--accent)' : 'var(--ink-2)', flexShrink: 0 }}>
+        <Icon name="bell" size={17} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="t-title" style={{ fontSize: 14.5, color: 'var(--ink)' }}>Reminders</div>
+        <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 3, lineHeight: 1.4 }}>{sub}</div>
+      </div>
+      {!denied && (
+        <button onClick={toggle} role="switch" aria-checked={on} aria-label="Toggle reminders"
+          disabled={state === 'loading'}
+          style={{ flexShrink: 0, width: 44, height: 26, borderRadius: 999, border: 'none', padding: 0, position: 'relative', cursor: state === 'loading' ? 'default' : 'pointer', background: on ? 'var(--ink)' : 'var(--hairline)', transition: 'background 0.2s', opacity: state === 'loading' ? 0.6 : 1 }}>
+          <span style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── App ─────────────────────────────────────────
 const LS_KEY = 'poolDashboard_v2';
 const loadState = () => {
@@ -836,6 +894,30 @@ function App() {
     try { localStorage.setItem(LS_KEY, JSON.stringify({ todos, testData, logEntries, phHistory, routines })); }
     catch (e) { /* quota / private mode */ }
   }, [todos, testData, logEntries, phHistory, routines]);
+
+  // Reminders: re-arm on load if previously enabled, and re-check whenever the
+  // app regains focus (catches routines that came due while it was backgrounded).
+  React.useEffect(() => {
+    if (window.PoolNotify) window.PoolNotify.resume();
+    const onVis = () => {
+      if (document.visibilityState === 'visible' && window.PoolNotify) window.PoolNotify.checkNow();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
+  // Mirror each routine's next-due timestamp into IndexedDB so the background
+  // sync can read it, then run a foreground check (a no-op unless enabled).
+  React.useEffect(() => {
+    if (!window.PoolNotify || !window.RoutinesAPI) return;
+    const now = Date.now();
+    const schedule = routines.map(r => {
+      const s = window.RoutinesAPI.ruleStatus(r, logEntries, now);
+      return { id: r.id, name: r.name, dueTs: s.dueTs };
+    });
+    window.PoolNotify.writeSchedule(schedule);
+    window.PoolNotify.checkNow();
+  }, [routines, logEntries]);
 
   // Toast lives at App level so it shows on every screen. Optional action
   // button (e.g. Undo) extends the visible time to 5s.
@@ -1004,6 +1086,9 @@ function App() {
       setTodos(newTodos);
       console.log('Recs parsed:', parsed.recs);
       console.log('Todos built:', newTodos);
+      if (window.PoolNotify && newTodos.length) {
+        window.PoolNotify.notifyTodos(newTodos.length, newTodos[0] && newTodos[0].label, parsed.date);
+      }
       showToast('✓ Loaded test from ' + parsed.date);
     } catch (err) {
       showToast('Could not parse PDF — try another file');
@@ -1067,7 +1152,7 @@ function App() {
     dashboard: <Dashboard onNav={setScreen} todos={todos} onToggle={onToggle} onDelete={onDelete} toast={toast} testData={testData} onUpload={triggerUpload} uploading={uploading} phHistory={phHistory} routines={routines} logEntries={logEntries} onRoutineDone={onRoutineDone} />,
     chemistry: <Chemistry onNav={setScreen} testData={testData} onReupload={triggerUpload} />,
     log: <Log onNav={setScreen} todos={todos} onToggle={onToggle} testData={testData} onLogEntry={onLogEntry} />,
-    routines: window.RoutinesScreen ? <window.RoutinesScreen rules={routines} entries={logEntries} onAdd={() => setEditorRule({})} onEdit={setEditorRule} onDelete={onDeleteRoutine} /> : null,
+    routines: window.RoutinesScreen ? <window.RoutinesScreen rules={routines} entries={logEntries} onAdd={() => setEditorRule({})} onEdit={setEditorRule} onDelete={onDeleteRoutine} banner={<ReminderToggle />} /> : null,
     history: <History onNav={setScreen} entries={logEntries} onExport={onExport} onImport={onImport} />,
   };
 
