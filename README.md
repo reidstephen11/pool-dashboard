@@ -11,10 +11,14 @@ recurring maintenance (routines), and keeps a full activity history.
 
 | File | Purpose |
 |---|---|
-| `index.html` | Entry point — loads React 18 + Babel standalone from CDN, fonts from Google Fonts, then the two JSX files |
+| `index.html` | Entry point — loads React 18 + Babel standalone from CDN, fonts from Google Fonts, the notify scripts, then the two JSX files |
 | `app.jsx` | Main app: PDF parser, Dashboard / Chemistry / Log / History screens, state + localStorage persistence |
 | `routines.jsx` | Recurring-rule engine, Routines screen, routine editor, and the shared stroke-icon set (`window.Icon`) — must load **before** `app.jsx` |
 | `styles.css` | Design tokens and all component CSS |
+| `notify-core.js` | Reminder logic shared by the page and the service worker: IndexedDB store, "what's due" diff, `showNotification`. Plain JS (runs in both contexts) |
+| `notify.js` | Page-side glue — `window.PoolNotify` (permission, SW + periodic-sync registration, schedule mirroring). Loads after `notify-core.js` |
+| `sw.js` | Service worker — background routine checks (Periodic Background Sync) + notification clicks. No fetch handler |
+| `manifest.webmanifest` · `icons/` | PWA manifest and app/notification icons (makes the app installable) |
 | `dist/index.standalone.html` | Old fully-inlined offline build (v4, stale — kept for reference until regenerated) |
 
 JSX is transpiled in the browser by Babel standalone, so there is no build
@@ -49,6 +53,24 @@ All state persists to `localStorage` under the key `poolDashboard_v2`
 Export/Import moves data between browsers or devices as a JSON backup file.
 Log entries carry a `kind` (`chemical | backwash | aiper | note`); legacy
 entries with emoji `icon` fields still render and match routines.
+
+## Reminders (push notifications)
+
+Opt-in via the **Reminders** toggle on the Routines screen. When enabled, the app
+notifies you the moment a new item lands on your action list:
+
+- **A routine comes due** (e.g. "Add 500 mL acid" every Saturday) — the app mirrors
+  each routine's next-due timestamp into IndexedDB, and both the running app and a
+  background Periodic Background Sync check it and fire a notification once per
+  due-cycle (de-duplicated via a `notified` map so you're not pinged repeatedly).
+- **A new test is imported** — a summary notification for the actions the PDF added.
+
+It's entirely client-side — no backend. On an **installed PWA (Android/Chromium)**
+Periodic Background Sync delivers reminders even when the app is closed (the browser
+controls cadence — roughly daily, best-effort). Everywhere else, reminders fire while
+the app is open and it catches up on focus. The feature is fully feature-detected: if
+notifications, service workers or IndexedDB are unavailable/blocked, the toggle hides
+itself and the app behaves exactly as before.
 
 ## PDF parsing
 

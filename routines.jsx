@@ -12,6 +12,7 @@ const ICON_PATHS = {
   bot:     <g><rect x="4" y="7" width="12" height="8.5" rx="2" /><path d="M10 4.6V7" /><path d="M10 3.6h.01" /><path d="M7.4 10.6h.01" /><path d="M12.6 10.6h.01" /><path d="M8 13h4" /></g>,
   pencil:  <g><path d="M4 16l.9-3.6 8.5-8.5a1.5 1.5 0 0 1 2.1 2.1l-8.5 8.5L4 16z" /><path d="M12.2 5.1l2.1 2.1" /></g>,
   upload:  <g><path d="M10 13V4.5" /><path d="M6.5 8 10 4.5 13.5 8" /><path d="M4 15.5h12" /></g>,
+  bell:    <g><path d="M10 3.4a4.4 4.4 0 0 0-4.4 4.4c0 3-1.2 4.1-1.8 4.7-.3.3-.1.8.3.8h11.8c.4 0 .6-.5.3-.8-.6-.6-1.8-1.7-1.8-4.7A4.4 4.4 0 0 0 10 3.4z" /><path d="M8.5 16.1a1.6 1.6 0 0 0 3 0" /></g>,
 };
 
 function Icon({ name, size = 20, strokeWidth = 1.5, style }) {
@@ -221,7 +222,7 @@ function routineToTodo(rule, state) {
 }
 
 // ─── Routines screen ──────────────────────────────
-function RoutinesScreen({ rules, entries, onAdd, onEdit, onDelete }) {
+function RoutinesScreen({ rules, entries, onAdd, onEdit, onDelete, banner }) {
   const now = Date.now();
   const enriched = rules.map(r => ({ r, s: ruleStatus(r, entries, now) }));
   // Sort: most overdue first → due → upcoming (soonest first)
@@ -243,6 +244,7 @@ function RoutinesScreen({ rules, entries, onAdd, onEdit, onDelete }) {
       </div>
 
       <div style={{ padding: '16px 14px 100px' }}>
+        {banner}
         {enriched.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--muted)' }}>
             <div className="t-title" style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 6 }}>No routines yet</div>
