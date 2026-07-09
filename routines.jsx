@@ -13,6 +13,7 @@ const ICON_PATHS = {
   pencil:  <g><path d="M4 16l.9-3.6 8.5-8.5a1.5 1.5 0 0 1 2.1 2.1l-8.5 8.5L4 16z" /><path d="M12.2 5.1l2.1 2.1" /></g>,
   upload:  <g><path d="M10 13V4.5" /><path d="M6.5 8 10 4.5 13.5 8" /><path d="M4 15.5h12" /></g>,
   bell:    <g><path d="M10 3.4a4.4 4.4 0 0 0-4.4 4.4c0 3-1.2 4.1-1.8 4.7-.3.3-.1.8.3.8h11.8c.4 0 .6-.5.3-.8-.6-.6-1.8-1.7-1.8-4.7A4.4 4.4 0 0 0 10 3.4z" /><path d="M8.5 16.1a1.6 1.6 0 0 0 3 0" /></g>,
+  vial:    <g><path d="M7.4 3h5.2" /><path d="M8.3 3v9.3a1.7 1.7 0 0 0 3.4 0V3" /><path d="M8.3 8.4h3.4" /></g>,
 };
 
 function Icon({ name, size = 20, strokeWidth = 1.5, style }) {
@@ -25,8 +26,10 @@ function Icon({ name, size = 20, strokeWidth = 1.5, style }) {
   );
 }
 
-// Log-entry kind → icon name. Kinds: chemical | backwash | aiper | note
-const KIND_ICON = { chemical: 'flask', backwash: 'droplet', aiper: 'bot', note: 'pencil' };
+// Log-entry kind → icon name. Kinds: chemical | backwash | aiper | watertest | note.
+// 'aiper' is the pool-cleaner kind — the legacy token is kept so old persisted
+// entries and routine matchers keep working; all user-facing text says "Pool cleaner".
+const KIND_ICON = { chemical: 'flask', backwash: 'droplet', aiper: 'bot', watertest: 'vial', note: 'pencil' };
 
 // Resolve an entry's kind; falls back to legacy emoji/type for old persisted data.
 function entryKind(entry) {
@@ -37,7 +40,8 @@ function entryKind(entry) {
   const t = entry.type || '';
   if (/added|acid|chlorine|shock/i.test(t)) return 'chemical';
   if (/backwash/i.test(t)) return 'backwash';
-  if (/aiper/i.test(t)) return 'aiper';
+  if (/aiper|pool\s*cleaner/i.test(t)) return 'aiper';
+  if (/water\s*test/i.test(t)) return 'watertest';
   return 'note';
 }
 
@@ -56,7 +60,7 @@ const SEED_ROUTINES = [
   },
   {
     id: 'r-aiper',
-    name: 'Run Aiper Scuba',
+    name: 'Run pool cleaner',
     schedule: { type: 'interval', intervalDays: 4 },
     match:    { logType: 'aiper' },
   },
@@ -65,6 +69,12 @@ const SEED_ROUTINES = [
     name: 'Backwash filter',
     schedule: { type: 'interval', intervalDays: 30 },
     match:    { logType: 'backwash' },
+  },
+  {
+    id: 'r-watertest',
+    name: 'Get water tested',
+    schedule: { type: 'interval', intervalDays: 28 },
+    match:    { logType: 'watertest' },
   },
 ];
 
@@ -90,8 +100,9 @@ function matchesRule(rule, entry) {
     if (!m.chemical) return true;
     return (entry.type || '').toLowerCase().includes(m.chemical.toLowerCase());
   }
-  if (m.logType === 'aiper')    return kind === 'aiper' || /aiper/i.test(entry.type || '');
+  if (m.logType === 'aiper')    return kind === 'aiper' || /aiper|pool\s*cleaner/i.test(entry.type || '');
   if (m.logType === 'backwash') return kind === 'backwash' || /backwash/i.test(entry.type || '');
+  if (m.logType === 'watertest') return kind === 'watertest' || /water\s*test/i.test(entry.type || '');
   if (m.logType === 'note')     return entry.kind === 'note' || entry.icon === '✏️';
   return false;
 }
@@ -319,7 +330,11 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
     const id = initial?.id || ('r-' + Date.now().toString(36));
     let finalName = name.trim();
     if (!finalName) {
-      finalName = logType === 'chemical' ? 'Add ' + chemical : (logType === 'aiper' ? 'Run Aiper Scuba' : logType === 'backwash' ? 'Backwash filter' : 'Routine');
+      finalName = logType === 'chemical' ? 'Add ' + chemical
+        : logType === 'aiper' ? 'Run pool cleaner'
+        : logType === 'backwash' ? 'Backwash filter'
+        : logType === 'watertest' ? 'Get water tested'
+        : 'Routine';
     }
     const rule = {
       id, name: finalName,
@@ -355,12 +370,13 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
           {/* Match type */}
           <div className="form-field">
             <div className="form-label">What counts as done?</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, marginTop: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, marginTop: 6 }}>
               {[
-                { id: 'chemical', label: 'Chemical' },
-                { id: 'aiper',    label: 'Aiper' },
-                { id: 'backwash', label: 'Backwash' },
-                { id: 'note',     label: 'Note' },
+                { id: 'chemical',  label: 'Chemical' },
+                { id: 'aiper',     label: 'Pool cleaner' },
+                { id: 'backwash',  label: 'Backwash' },
+                { id: 'watertest', label: 'Water test' },
+                { id: 'note',      label: 'Note' },
               ].map(o => (
                 <button key={o.id} onClick={() => setLogType(o.id)}
                   style={{ background: logType === o.id ? 'var(--ink)' : 'var(--surface)', color: logType === o.id ? '#fff' : 'var(--ink-2)', border: '1px solid', borderColor: logType === o.id ? 'var(--ink)' : 'var(--hairline)', borderRadius: 10, padding: '8px 4px', fontSize: 11.5, fontWeight: 500, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
