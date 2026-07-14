@@ -108,6 +108,23 @@
     return CORE.idbSet('schedule', schedule || []).catch(function () {});
   }
 
+  // Earliest local hour a routine reminder may be delivered (see pickDue in
+  // notify-core.js). Stored in IndexedDB, not localStorage, because the service
+  // worker reads it too.
+  function getNotifyHour() {
+    if (!CORE) return Promise.resolve(8);
+    return CORE.idbGet('notifyHour').then(function (v) {
+      return typeof v === 'number' ? v : CORE.DEFAULT_HOUR;
+    }).catch(function () { return CORE.DEFAULT_HOUR; });
+  }
+
+  // Re-check immediately after saving: moving the hour back to one that has
+  // already passed should release anything due today rather than wait a day.
+  function setNotifyHour(h) {
+    if (!CORE) return Promise.resolve();
+    return CORE.idbSet('notifyHour', h).then(checkNow).catch(function () {});
+  }
+
   // Foreground check — only fires when enabled + permission granted.
   function checkNow() {
     return isEnabled().then(function (on) {
@@ -141,6 +158,7 @@
   window.PoolNotify = {
     supported: supported, permission: permission, isEnabled: isEnabled,
     enable: enable, disable: disable, resume: resume,
+    getNotifyHour: getNotifyHour, setNotifyHour: setNotifyHour,
     writeSchedule: writeSchedule, checkNow: checkNow, notifyTodos: notifyTodos
   };
 })();

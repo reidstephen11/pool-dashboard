@@ -809,9 +809,13 @@ function groupEntriesByMonth(entries) {
 // ─── Reminders toggle (Routines screen) ──────────
 // Self-contained: talks to window.PoolNotify. Hidden entirely on browsers that
 // don't support notifications/service workers.
+const hourLabel = (h) => ((h % 12) || 12) + ':00 ' + (h < 12 ? 'am' : 'pm');
+const NOTIFY_HOURS = Array.from({ length: 24 }, (_, i) => i);
+
 function ReminderToggle() {
   const [state, setState] = React.useState('loading'); // loading|off|on|denied|unsupported
   const [bg, setBg] = React.useState(false);           // background sync granted?
+  const [hour, setHour] = React.useState(null);        // earliest delivery hour; null until loaded
 
   React.useEffect(() => {
     let alive = true;
@@ -819,6 +823,7 @@ function ReminderToggle() {
     if (!PN || !PN.supported()) { setState('unsupported'); return; }
     if (PN.permission() === 'denied') { setState('denied'); return; }
     PN.isEnabled().then(on => { if (alive) setState(on ? 'on' : 'off'); });
+    PN.getNotifyHour().then(h => { if (alive) setHour(h); });
     return () => { alive = false; };
   }, []);
 
@@ -830,6 +835,12 @@ function ReminderToggle() {
     const res = await PN.enable();
     if (res.ok) { setState('on'); setBg(!!res.background); }
     else setState(res.permission === 'denied' ? 'denied' : 'off');
+  };
+
+  // Optimistic — the select is the source of truth for the UI, IndexedDB catches up.
+  const changeHour = (h) => {
+    setHour(h);
+    if (window.PoolNotify) window.PoolNotify.setNotifyHour(h);
   };
 
   if (state === 'unsupported') return null;
@@ -845,20 +856,35 @@ function ReminderToggle() {
       : 'Get a notification when a task becomes due, or when a new test adds actions.';
 
   return (
-    <div className="card" style={{ padding: '14px 16px', marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
-      <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--hairline-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: on ? 'var(--accent)' : 'var(--ink-2)', flexShrink: 0 }}>
-        <Icon name="bell" size={17} />
+    <div className="card" style={{ padding: '14px 16px', marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--hairline-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: on ? 'var(--accent)' : 'var(--ink-2)', flexShrink: 0 }}>
+          <Icon name="bell" size={17} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="t-title" style={{ fontSize: 14.5, color: 'var(--ink)' }}>Reminders</div>
+          <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 3, lineHeight: 1.4 }}>{sub}</div>
+        </div>
+        {!denied && (
+          <button onClick={toggle} role="switch" aria-checked={on} aria-label="Toggle reminders"
+            disabled={state === 'loading'}
+            style={{ flexShrink: 0, width: 44, height: 26, borderRadius: 999, border: 'none', padding: 0, position: 'relative', cursor: state === 'loading' ? 'default' : 'pointer', background: on ? 'var(--ink)' : 'var(--hairline)', transition: 'background 0.2s', opacity: state === 'loading' ? 0.6 : 1 }}>
+            <span style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
+          </button>
+        )}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="t-title" style={{ fontSize: 14.5, color: 'var(--ink)' }}>Reminders</div>
-        <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 3, lineHeight: 1.4 }}>{sub}</div>
-      </div>
-      {!denied && (
-        <button onClick={toggle} role="switch" aria-checked={on} aria-label="Toggle reminders"
-          disabled={state === 'loading'}
-          style={{ flexShrink: 0, width: 44, height: 26, borderRadius: 999, border: 'none', padding: 0, position: 'relative', cursor: state === 'loading' ? 'default' : 'pointer', background: on ? 'var(--ink)' : 'var(--hairline)', transition: 'background 0.2s', opacity: state === 'loading' ? 0.6 : 1 }}>
-          <span style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
-        </button>
+
+      {on && hour != null && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--hairline-2)' }}>
+          <div style={{ minWidth: 0 }}>
+            <label htmlFor="notify-hour" className="t-title" style={{ fontSize: 13, color: 'var(--ink)' }}>Not before</label>
+            <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 2, lineHeight: 1.4 }}>Due routines are held until this time, so nothing wakes you overnight.</div>
+          </div>
+          <select id="notify-hour" value={hour} onChange={e => changeHour(+e.target.value)}
+            style={{ flexShrink: 0, fontFamily: 'Geist Mono', fontSize: 13, color: 'var(--accent)', background: 'var(--surface-2)', border: '1px solid var(--hairline-2)', borderRadius: 8, padding: '6px 10px', outline: 'none', appearance: 'none', cursor: 'pointer' }}>
+            {NOTIFY_HOURS.map(h => <option key={h} value={h}>{hourLabel(h)}</option>)}
+          </select>
+        </div>
       )}
     </div>
   );
