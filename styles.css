@@ -228,7 +228,7 @@ body {
 .form-select .chevron { color: var(--faint); font-size: 11px; }
 
 /* ── Quick-add buttons ── */
-.quick-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; padding: 0 14px 16px; }
+.quick-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; padding: 0 14px 16px; }
 .quick-btn {
   background: var(--surface);
   border: 1px solid var(--hairline);

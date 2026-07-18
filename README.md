@@ -51,8 +51,13 @@ these tokens — no new hex colors, no drop shadows, no emoji.
 All state persists to `localStorage` under the key `poolDashboard_v2`
 (`todos`, `testData`, `logEntries`, `phHistory`, `routines`). History →
 Export/Import moves data between browsers or devices as a JSON backup file.
-Log entries carry a `kind` (`chemical | backwash | aiper | note`); legacy
-entries with emoji `icon` fields still render and match routines.
+Log entries carry a `kind` (`chemical | backwash | aiper | watertest | note`).
+`aiper` is the pool-cleaner kind — the UI says "Pool cleaner" everywhere, but
+the stored token is kept so existing data keeps matching. Legacy entries with
+emoji `icon` fields still render and match routines. Uploading a test PDF also
+logs a `watertest` entry (from the report's own date), which resets the
+seeded "Get water tested" routine — its frequency is editable like any other
+routine's.
 
 ## Reminders (push notifications)
 

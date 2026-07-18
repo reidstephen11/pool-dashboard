@@ -516,7 +516,7 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
   const [saved, setSaved] = React.useState(false);
   const [showChemPicker, setShowChemPicker] = React.useState(false);
   const [showUnitPicker, setShowUnitPicker] = React.useState(false);
-  const [logType, setLogType] = React.useState('chemical'); // chemical | backwash | aiper | note
+  const [logType, setLogType] = React.useState('chemical'); // chemical | backwash | aiper (pool cleaner) | watertest | note
   const [errMsg, setErrMsg] = React.useState('');
 
   const chemicals = ['Hydrochloric Acid', 'Non Chlorine Shock', 'Calcium Up', 'Sunblock', 'Algaecide', 'Clarifier', 'Chlorine', 'Other'];
@@ -547,7 +547,11 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
       const d = new Date(datetime);
       const dateStr = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
       onLogEntry({
-        type: logType === 'chemical' ? `Added ${amount} ${unit} ${chemical}` : logType === 'backwash' ? 'Backwash' : logType === 'aiper' ? 'Aiper Scuba run' : notes || 'Note',
+        type: logType === 'chemical' ? `Added ${amount} ${unit} ${chemical}`
+          : logType === 'backwash' ? 'Backwash'
+          : logType === 'aiper' ? 'Pool cleaner run'
+          : logType === 'watertest' ? 'Water test'
+          : notes || 'Note',
         kind: logType,
         date: dateStr,
         ts: d.getTime(),
@@ -561,10 +565,11 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
   };
 
   const typeButtons = [
-    { id: 'chemical', label: 'Chemical' },
-    { id: 'backwash', label: 'Backwash' },
-    { id: 'aiper',    label: 'Aiper Run' },
-    { id: 'note',     label: 'Note' },
+    { id: 'chemical',  label: 'Chemical' },
+    { id: 'backwash',  label: 'Backwash' },
+    { id: 'aiper',     label: 'Pool cleaner' },
+    { id: 'watertest', label: 'Water test' },
+    { id: 'note',      label: 'Note' },
   ];
 
   return (
@@ -650,8 +655,8 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
       </div>
       )}
 
-      {/* Backwash / Aiper forms */}
-      {(logType === 'backwash' || logType === 'aiper') && (
+      {/* Backwash / Pool cleaner / Water test forms */}
+      {(logType === 'backwash' || logType === 'aiper' || logType === 'watertest') && (
         <div className="log-form">
           <div className="form-field">
             <div className="form-label">Date &amp; Time</div>
@@ -754,7 +759,7 @@ function History({ onNav, entries: userEntries, onExport, onImport }) {
         {entries.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--muted)' }}>
             <div className="t-title" style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 6 }}>No activity yet</div>
-            <div style={{ fontSize: 12.5 }}>Log a dose, backwash or Aiper run and it will appear here.</div>
+            <div style={{ fontSize: 12.5 }}>Log a dose, backwash or pool cleaner run and it will appear here.</div>
           </div>
         ) : (
         <React.Fragment>
@@ -866,13 +871,77 @@ function ReminderToggle() {
 
 // ─── App ─────────────────────────────────────────
 const LS_KEY = 'poolDashboard_v2';
+const STATE_REV = 1; // bump when migrateData() gains a new one-time step
 const loadState = () => {
   try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; }
   catch (e) { return null; }
 };
 
+// Parse the report's "2 Jul 2026" / "2 July 2026" date without Date.parse
+// (Safari rejects that format). Returns a local-midnight timestamp or null.
+function parseTestDate(s) {
+  const m = /^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/.exec((s || '').trim());
+  if (!m) return null;
+  const mi = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].slice(0, 3).toLowerCase());
+  if (mi < 0) return null;
+  const d = new Date(+m[3], mi, +m[1]);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+// Insert into a newest-first entry list at the right spot for its ts.
+function insertEntrySorted(list, entry) {
+  const i = list.findIndex(e => (e.ts || 0) <= (entry.ts || 0));
+  const copy = list.slice();
+  copy.splice(i < 0 ? copy.length : i, 0, entry);
+  return copy;
+}
+
+function waterTestEntry(ts) {
+  return {
+    type: 'Water test · Poolwerx', kind: 'watertest',
+    date: new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }),
+    ts, note: '',
+  };
+}
+
+// The robot was branded "Aiper Scuba" in older data; everything now says "Pool cleaner".
+const renamePoolCleaner = (s) => (s || '')
+  .replace(/run\s+aiper(\s+scuba)?/gi, 'Run pool cleaner')
+  .replace(/aiper(\s+scuba)?\s+run/gi, 'Pool cleaner run')
+  .replace(/scuba\s+run/gi, 'Pool cleaner run')
+  .replace(/aiper(\s+scuba)?/gi, 'pool cleaner')
+  .replace(/scuba/gi, 'pool cleaner')
+  .replace(/^pool cleaner/, 'Pool cleaner');
+
+// Migrations over persisted/imported data. The renames are idempotent and run
+// every time (so old backup imports come out clean too); the rev-guarded block
+// seeds the water-test routine once, anchored to the last imported test so its
+// first due date reflects reality. Deleting that routine later sticks.
+function migrateData(data) {
+  if (!data || typeof data !== 'object') return data;
+  const out = { ...data };
+  if (Array.isArray(out.routines)) {
+    out.routines = out.routines.map(r => /aiper|scuba/i.test(r.name || '') ? { ...r, name: renamePoolCleaner(r.name) } : r);
+  }
+  if (Array.isArray(out.logEntries)) {
+    out.logEntries = out.logEntries.map(e => /aiper|scuba/i.test(e.type || '') ? { ...e, type: renamePoolCleaner(e.type) } : e);
+  }
+  if ((out.rev || 0) < 1) {
+    if (Array.isArray(out.routines) && !out.routines.some(r => r.match && r.match.logType === 'watertest')) {
+      const seed = window.RoutinesAPI && window.RoutinesAPI.SEED_ROUTINES.find(r => r.match.logType === 'watertest');
+      if (seed) out.routines = [...out.routines, { ...seed, createdTs: Date.now() }];
+    }
+    const entries = Array.isArray(out.logEntries) ? out.logEntries : [];
+    const testTs = out.testData && out.testData.date ? parseTestDate(out.testData.date) : null;
+    if (testTs && !entries.some(e => entryKind(e) === 'watertest')) {
+      out.logEntries = insertEntrySorted(entries, waterTestEntry(testTs));
+    }
+  }
+  return out;
+}
+
 function App() {
-  const persisted = loadState();
+  const persisted = migrateData(loadState());
   const [screen, setScreen] = React.useState('dashboard');
   const [todos, setTodos] = React.useState((persisted && persisted.todos) || []);
   const [toast, setToast] = React.useState('');
@@ -891,7 +960,7 @@ function App() {
   const [editorRule, setEditorRule] = React.useState(null); // null | {} (new) | rule (edit)
 
   React.useEffect(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify({ todos, testData, logEntries, phHistory, routines })); }
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ rev: STATE_REV, todos, testData, logEntries, phHistory, routines })); }
     catch (e) { /* quota / private mode */ }
   }, [todos, testData, logEntries, phHistory, routines]);
 
@@ -1004,8 +1073,9 @@ function App() {
     const m = rule.match || {};
     const kind = m.logType || 'note';
     const type = kind === 'chemical' ? 'Added ' + (m.chemical || 'chemical')
-      : kind === 'aiper' ? 'Aiper Scuba run'
+      : kind === 'aiper' ? 'Pool cleaner run'
       : kind === 'backwash' ? 'Backwash'
+      : kind === 'watertest' ? 'Water test'
       : rule.name;
     const entry = { type, kind, date: dateStr, ts, note: 'Marked done from routine' };
     const smart = buildSmartToast(entry, logEntries);
@@ -1047,6 +1117,11 @@ function App() {
       });
       const updated = { ...testData, date: parsed.date, pool: parsed.pool || testData.pool, lsi: parsed.lsi != null ? parsed.lsi : testData.lsi, metrics: updatedMetrics };
       setTestData(updated);
+      // An imported report IS a water test — log it (once per test date) so the
+      // "Get water tested" routine resets from the report's own date.
+      const testTs = parseTestDate(parsed.date) || Date.now();
+      setLogEntries(prev => prev.some(e => e.kind === 'watertest' && e.ts === testTs)
+        ? prev : insertEntrySorted(prev, waterTestEntry(testTs)));
       if (parsed.ph != null) {
         const dateLabel = (parsed.date || '').split(' ').slice(0, 2).join(' ') || 'now';
         setPhHistory(prev => {
@@ -1104,9 +1179,9 @@ function App() {
     try {
       const payload = {
         app: 'poolDashboard',
-        version: '2.3',
+        version: '2.4',
         exportedAt: new Date().toISOString(),
-        data: { todos, testData, logEntries, phHistory },
+        data: { rev: STATE_REV, todos, testData, logEntries, phHistory, routines },
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -1131,13 +1206,15 @@ function App() {
     reader.onload = (ev) => {
       try {
         const parsed = JSON.parse(ev.target.result);
-        const data = (parsed && parsed.data) ? parsed.data : parsed;
-        if (!data || typeof data !== 'object') throw new Error('Invalid file');
+        const raw = (parsed && parsed.data) ? parsed.data : parsed;
+        if (!raw || typeof raw !== 'object') throw new Error('Invalid file');
         if (!window.confirm('Replace current data with the contents of this backup? This cannot be undone.')) return;
+        const data = migrateData(raw); // old backups: rename Aiper text, seed water-test routine
         if (Array.isArray(data.todos)) setTodos(data.todos);
         if (data.testData && data.testData.metrics) setTestData(data.testData);
         if (Array.isArray(data.logEntries)) setLogEntries(data.logEntries);
         if (Array.isArray(data.phHistory)) setPhHistory(data.phHistory);
+        if (Array.isArray(data.routines)) setRoutines(data.routines.map(r => r.createdTs ? r : { ...r, createdTs: Date.now() }));
         showToast('✓ Backup restored');
       } catch (err) {
         console.error(err);
