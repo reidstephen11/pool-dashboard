@@ -70,6 +70,15 @@ notifies you the moment a new item lands on your action list:
   due-cycle (de-duplicated via a `notified` map so you're not pinged repeatedly).
 - **A new test is imported** — a summary notification for the actions the PDF added.
 
+Routines are day-precision, so a routine's due timestamp is local **midnight** — but
+the background sync usually runs while the phone sits idle on a charger overnight,
+which would deliver the reminder at 3am. Routine reminders are therefore held until a
+**"Not before" hour (default 08:00 local)**, set on the Reminders card and stored in
+IndexedDB (`notifyHour`) so the service worker sees it too. The gate is on the wall
+clock rather than on the item, so an overdue routine can't leak out at night either —
+it waits for the first check after that hour. Test-import notifications are not gated:
+they're an immediate response to an upload you just performed.
+
 It's entirely client-side — no backend. On an **installed PWA (Android/Chromium)**
 Periodic Background Sync delivers reminders even when the app is closed (the browser
 controls cadence — roughly daily, best-effort). Everywhere else, reminders fire while

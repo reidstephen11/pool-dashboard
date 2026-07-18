@@ -9,6 +9,16 @@
   var DB_NAME = 'poolDashboardNotify';
   var STORE = 'kv';
   var DAY_MS = 86400000;
+  var DEFAULT_HOUR = 8; // reminders are held until 08:00 local — see pickDue
+
+  // Local timestamp of hour:00 on the day `now` falls in. Built by mutating a
+  // Date rather than dayStart + hour*3600000 so it stays on the wall clock
+  // across a DST shift.
+  function todayAt(now, hour) {
+    var d = new Date(now);
+    d.setHours(hour, 0, 0, 0);
+    return d.getTime();
+  }
 
   function openDB() {
     return new Promise(function (resolve, reject) {
@@ -48,13 +58,21 @@
   // and not yet notified for this cycle) plus the updated notified map. Marks are
   // kept only for ids still present in the schedule, so deleted routines are
   // forgotten and a rescheduled routine (new dueTs) can notify again next cycle.
-  function pickDue(schedule, notified, now) {
+  //
+  // Routines are day-precision, so dueTs is local MIDNIGHT — a routine is
+  // technically due from 00:00. The background sync tends to run while the phone
+  // sits idle on a charger, i.e. overnight, so firing on dueTs alone delivers the
+  // reminder at 3am. Nothing is released before `hour` (default 08:00) local: the
+  // gate is on the wall clock, not on the item, so a routine that is days overdue
+  // can't slip out at night either. It waits for the first check after 08:00.
+  function pickDue(schedule, notified, now, hour) {
     schedule = schedule || [];
     notified = notified || {};
+    var open = now >= todayAt(now, hour == null ? DEFAULT_HOUR : hour);
     var due = [], next = {};
     schedule.forEach(function (it) {
       next[it.id] = notified[it.id];
-      if (it.dueTs != null && it.dueTs <= now && notified[it.id] !== it.dueTs) {
+      if (open && it.dueTs != null && it.dueTs <= now && notified[it.id] !== it.dueTs) {
         due.push(it);
         next[it.id] = it.dueTs;
       }
@@ -101,9 +119,10 @@
   function runCheck(reg, now) {
     var run = function () {
       var when = now || Date.now();
-      return Promise.all([idbGet('schedule'), idbGet('notified')]).then(function (r) {
+      return Promise.all([idbGet('schedule'), idbGet('notified'), idbGet('notifyHour')]).then(function (r) {
         var schedule = r[0] || [], notified = r[1] || {};
-        var res = pickDue(schedule, notified, when);
+        var hour = typeof r[2] === 'number' ? r[2] : DEFAULT_HOUR;
+        var res = pickDue(schedule, notified, when, hour);
         if (!res.due.length) return 0;
         return showRoutineNotifications(reg, res.due, when).then(function (shownIds) {
           if (!shownIds.length) return 0;
@@ -119,6 +138,7 @@
   }
 
   self.PoolNotifyCore = {
+    DEFAULT_HOUR: DEFAULT_HOUR, todayAt: todayAt,
     idbGet: idbGet, idbSet: idbSet, pickDue: pickDue,
     showRoutineNotifications: showRoutineNotifications, runCheck: runCheck
   };
