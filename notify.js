@@ -1,7 +1,9 @@
-// notify.js — page-side glue for reminders. Exposes window.PoolNotify, used by
-// app.jsx. Loads AFTER notify-core.js (which provides self.PoolNotifyCore).
-// Everything is feature-detected and failure-tolerant: if notifications, service
-// workers or IndexedDB are missing/blocked, the app runs exactly as before.
+// notify.js — page-side glue for reminders, plus service-worker registration
+// (the worker also backs the offline cache — see sw.js). Exposes
+// window.PoolNotify, used by app.jsx. Loads AFTER notify-core.js (which provides
+// self.PoolNotifyCore). Everything is feature-detected and failure-tolerant: if
+// notifications, service workers or IndexedDB are missing/blocked, the app runs
+// exactly as before.
 (function () {
   var CORE = self.PoolNotifyCore;
   var PERIODIC_TAG = 'pool-routine-check';
@@ -21,6 +23,16 @@
       return navigator.serviceWorker.ready;
     }).then(function (reg) { swReg = reg; return reg; })
       .catch(function (e) { console.warn('[PoolNotify] SW registration failed', e); return null; });
+  }
+
+  // The service worker also provides the offline cache now, so it has to be
+  // registered on every load — not only when reminders are switched on. Without
+  // this, anyone who never enabled reminders had no worker at all and the app
+  // could not open without a network connection. Notification permission is a
+  // separate, still-opt-in step: registering the worker asks for nothing.
+  function ensureRegistered() {
+    if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+    return registerSW();
   }
 
   // Resolve the active registration WITHOUT hanging. navigator.serviceWorker.ready
@@ -157,7 +169,7 @@
 
   window.PoolNotify = {
     supported: supported, permission: permission, isEnabled: isEnabled,
-    enable: enable, disable: disable, resume: resume,
+    enable: enable, disable: disable, resume: resume, ensureRegistered: ensureRegistered,
     getNotifyHour: getNotifyHour, setNotifyHour: setNotifyHour,
     writeSchedule: writeSchedule, checkNow: checkNow, notifyTodos: notifyTodos
   };

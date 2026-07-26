@@ -5,8 +5,9 @@
   --surface-2: #f5fafc;        /* subtle cool alt surface */
   --ink:       #0c1a22;        /* near-black, teal undertone */
   --ink-2:     #24343c;
-  --muted:     #52646d;
-  --faint:     #82949c;
+  --muted:     #52646d;        /* 6.17:1 on white, 5.60:1 on --bg */
+  --faint:     #5e6b71;        /* was #82949c — 3.15:1 on white, below AA. Now 5.50:1 / 4.99:1 on --bg */
+  --line:      #7f8b90;        /* non-text UI outlines (unchecked controls): 3.5:1 on white */
   --hairline:  #dbe6ea;        /* 1px borders, no shadows */
   --hairline-2:#e6eef1;
 
@@ -26,10 +27,35 @@
   /* Hero — deep-water teal-navy slab */
   --hero-bg:   #0a2a3a;
   --hero-fg:   #eaf6fb;
+  /* Secondary hero text. The old inline rgba(234,246,251,0.5) composited to
+     4.48:1 and the 0.4 variant to 3.40:1, both under AA on --hero-bg; 0.62
+     gives 6.0:1. Tokenised so it can't drift back — the Routines hero was also
+     still using a warm #f6f5f2 left over from the pre-"Deep Lagoon" palette. */
+  --hero-dim:   rgba(234, 246, 251, 0.62);
+  --hero-dim-2: rgba(234, 246, 251, 0.62);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+/* Visible focus for keyboard users everywhere. Several controls set
+   outline:none, which left keyboard navigation with no indication of position. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Honour the OS "reduce motion" setting: the staggered fade-up on every card,
+   the swipe transform and the toast slide were unconditional. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 body {
   background: var(--bg);
   min-height: 100vh;
@@ -47,6 +73,20 @@ body {
     border-left: 1px solid var(--hairline);
     border-right: 1px solid var(--hairline);
   }
+}
+
+/* App shell. 100vh on a mobile browser is the LARGE viewport — it stays tall
+   while the URL bar is showing, so the sticky bottom nav was pushed below the
+   fold on first paint. dvh tracks the visible area; svh is the safe fallback
+   order for older engines. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: var(--bg);
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
 }
 
 /* Scrollable screen inside the frame */
@@ -85,7 +125,8 @@ body {
   pointer-events: none;
 }
 
-/* ── Upload zone ── */
+/* ── Upload zone (a real <button> — it used to be an onClick div, so a
+      keyboard user could not import their first PDF at all) ── */
 .upload-zone {
   border: 1px dashed rgba(255,255,255,0.22);
   border-radius: 12px;
@@ -96,6 +137,10 @@ body {
   gap: 12px;
   cursor: pointer;
   transition: background 0.18s, border-color 0.18s;
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+  color: inherit;
 }
 .upload-zone:hover  { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.32); }
 .upload-zone:active { background: rgba(255,255,255,0.10); }
@@ -117,6 +162,7 @@ body {
   color: var(--ink-2);
 }
 .pill:active { transform: scale(0.96); }
+.pill { font-family: 'Geist', sans-serif; min-height: 30px; }
 .pill::before {
   content: '';
   width: 6px; height: 6px; border-radius: 50%;
@@ -131,6 +177,14 @@ body {
 .sec-head { padding: 22px 18px 10px; display: flex; align-items: center; justify-content: space-between; }
 .sec-head span { font-family: 'Geist Mono', ui-monospace, monospace; font-weight: 500; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
 .sec-head a { font-size: 12.5px; color: var(--accent); font-weight: 500; cursor: pointer; letter-spacing: -0.005em; }
+/* Was an <a> with an onClick and no href — not focusable, not a link, not a
+   button. Same look, real control. */
+.link-btn {
+  background: none; border: none; padding: 4px 2px;
+  font-family: 'Geist', sans-serif; font-size: 12.5px; font-weight: 500;
+  color: var(--accent); cursor: pointer; letter-spacing: -0.005em;
+  white-space: nowrap;
+}
 
 /* ── Card primitives ── */
 .card {
@@ -155,6 +209,7 @@ body {
   position: absolute; right: 0; top: 0; bottom: 0; width: 80px;
   background: var(--bad); display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 18px; border-radius: 0 14px 14px 0;
+  border: none; cursor: pointer; font-family: inherit;
 }
 .todo-card {
   background: var(--surface);
@@ -178,16 +233,57 @@ body {
   width: 3px;
   border-radius: 0 3px 3px 0;
 }
+/* The circle is now a real button (role=checkbox) so the action can be ticked
+   off from the keyboard. The border was #bcccd1 — 1.65:1 on white, well under
+   the 3:1 minimum for a UI component, i.e. an unchecked box was near-invisible.
+   Padding widens the hit area to 44px without changing the drawn 22px circle. */
 .todo-check {
   width: 22px; height: 22px; min-width: 22px;
   border-radius: 999px;
-  border: 1.5px solid #bcccd1;
+  border: 1.5px solid var(--line);
+  background: transparent;
   display: flex; align-items: center; justify-content: center;
   margin-top: 1px;
   transition: background 0.2s, border-color 0.2s;
   font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  font-family: inherit;
+  position: relative;
+}
+/* Widen the touch target to 44px without growing the drawn 22px circle. */
+.todo-check::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 44px; height: 44px;
+  transform: translate(-50%, -50%);
 }
 .todo-check.checked { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* 32x32 and tucked 4px into the corner of a card that is itself a tap target —
+   an easy mis-tap and under the 44px guideline. */
+.todo-del-btn {
+  position: absolute; top: 0; right: 0;
+  width: 44px; height: 44px;
+  border: none; background: transparent;
+  color: var(--faint); font-size: 16px; line-height: 1;
+  cursor: pointer; border-radius: 8px;
+  font-family: inherit;
+}
+.todo-del-btn:hover { color: var(--bad); }
+
+/* Poolwerx dose rows on the Log screen — were onClick divs. */
+.dose-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 12px 16px;
+  background: transparent; border: none;
+  cursor: pointer; font-family: inherit; text-align: left;
+  min-height: 44px;
+}
+.dose-row:hover { background: var(--surface-2); }
 
 /* ── Chemistry range bars ── */
 .metric-card {
@@ -222,10 +318,31 @@ body {
   transition: border-color 0.18s;
 }
 .form-field:focus-within { border-color: var(--ink-2); }
-.form-label { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.form-label { display: block; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
 .form-val { font-family: 'Geist', sans-serif; font-size: 15px; font-weight: 500; color: var(--ink); letter-spacing: -0.005em; }
 .form-select { display: flex; align-items: center; justify-content: space-between; }
 .form-select .chevron { color: var(--faint); font-size: 11px; }
+
+/* Native <select> styled to match the old hand-rolled picker. appearance:none
+   removed the platform chevron, so one is drawn back in — without it there was
+   no affordance that the field opened anything. */
+.form-native-select {
+  font-family: 'Geist', sans-serif;
+  font-size: 15px; font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  border: none; outline: none;
+  width: 100%;
+  cursor: pointer;
+  padding: 0 20px 0 0;
+  background-color: transparent;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 7px center, right 2px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  -webkit-appearance: none; appearance: none;
+}
 
 /* ── Quick-add buttons ── */
 .quick-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; padding: 0 14px 16px; }
@@ -243,6 +360,7 @@ body {
 .quick-btn:hover { border-color: #c7d6dc; }
 .quick-btn:active { transform: scale(0.97); }
 .quick-btn .icon { font-size: 18px; line-height: 1; opacity: 0.85; }
+.quick-btn { font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; min-height: 44px; }
 
 /* ── Bottom nav ── */
 .bottom-nav {
@@ -287,6 +405,14 @@ body {
 }
 .btn-primary:hover  { background: #17323d; }
 .btn-primary:active { transform: scale(0.98); }
+/* Save with no day selected is disabled but looked identical to enabled, so the
+   button simply appeared not to work. */
+.btn-primary:disabled {
+  background: var(--hairline);
+  color: var(--muted);
+  cursor: not-allowed;
+  transform: none;
+}
 
 /* ── Header chip button (re-upload, export) ── */
 .chip-btn {
@@ -294,7 +420,8 @@ body {
   color: var(--hero-fg);
   border: 1px solid rgba(255,255,255,0.16);
   border-radius: 999px;
-  padding: 5px 11px;
+  padding: 8px 12px;
+  min-height: 36px;
   font-size: 11.5px;
   font-weight: 500;
   font-family: 'Geist', sans-serif;
@@ -303,11 +430,16 @@ body {
   transition: background 0.18s;
 }
 .chip-btn:hover { background: rgba(255,255,255,0.12); }
+.chip-btn:disabled { cursor: default; }
 
 /* ── Done toast ── */
 .toast {
   position: fixed;
-  bottom: 88px; left: 50%; transform: translateX(-50%) translateY(16px);
+  /* Clears the bottom nav plus the home-indicator inset — a fixed 88px sat on
+     top of the nav on a device with a home indicator. */
+  bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  left: 50%; transform: translateX(-50%) translateY(16px);
+  max-width: min(92vw, 440px);
   background: var(--ink);
   color: #fff;
   padding: 10px 18px;
