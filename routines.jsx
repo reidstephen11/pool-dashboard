@@ -209,16 +209,16 @@ function routineToTodo(rule, state) {
   let color, pri;
   const over = state.daysOver;
   if (state.status === 'overdue' && over >= 4) {
-    color = 'oklch(0.55 0.19 25)';            // red
+    color = 'var(--bad)';            // red
     pri = 'OVERDUE ' + over + 'D';
   } else if (state.status === 'overdue' && over >= 2) {
-    color = 'oklch(0.62 0.14 70)';            // amber
+    color = 'var(--warn)';            // amber
     pri = 'OVERDUE ' + over + 'D';
   } else if (state.status === 'overdue') {
-    color = 'oklch(0.55 0.06 240)';           // slate
+    color = 'var(--muted)';           // slate
     pri = 'ROUTINE · OVERDUE';
   } else {
-    color = 'oklch(0.55 0.06 240)';           // slate (due)
+    color = 'var(--muted)';           // slate (due)
     pri = 'ROUTINE';
   }
   return {
@@ -245,11 +245,11 @@ function RoutinesScreen({ rules, entries, onAdd, onEdit, onDelete, banner }) {
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div className="t-label" style={{ color: 'rgba(246,245,242,0.5)', marginBottom: 8 }}>Routines</div>
-              <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15 }}>Recurring tasks</div>
-              <div style={{ color: 'rgba(246,245,242,0.5)', fontSize: 12.5, marginTop: 6 }}>Rules watch your log and remind you</div>
+              <div className="t-label" style={{ color: 'var(--hero-dim)', marginBottom: 8 }}>Routines</div>
+              <h1 className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15, fontWeight: 600 }}>Recurring tasks</h1>
+              <div style={{ color: 'var(--hero-dim)', fontSize: 12.5, marginTop: 6 }}>Rules watch your log and remind you</div>
             </div>
-            <button onClick={onAdd} className="chip-btn" style={{ flexShrink: 0 }}>+ New rule</button>
+            <button type="button" onClick={onAdd} className="chip-btn" style={{ flexShrink: 0 }}>+ New rule</button>
           </div>
         </div>
       </div>
@@ -275,10 +275,10 @@ function RoutinesScreen({ rules, entries, onAdd, onEdit, onDelete, banner }) {
 }
 
 function statusAccent(state) {
-  if (state.status === 'overdue' && state.daysOver >= 4) return { c: 'oklch(0.55 0.19 25)', bg: 'var(--bad-tint)', label: 'OVERDUE ' + state.daysOver + 'D' };
-  if (state.status === 'overdue' && state.daysOver >= 2) return { c: 'oklch(0.62 0.14 70)', bg: 'var(--warn-tint)', label: 'OVERDUE ' + state.daysOver + 'D' };
-  if (state.status === 'overdue')                        return { c: 'oklch(0.55 0.06 240)', bg: 'oklch(0.965 0.012 240)', label: 'OVERDUE' };
-  if (state.status === 'due')                            return { c: 'oklch(0.55 0.06 240)', bg: 'oklch(0.965 0.012 240)', label: 'DUE TODAY' };
+  if (state.status === 'overdue' && state.daysOver >= 4) return { c: 'var(--bad)', bg: 'var(--bad-tint)', label: 'OVERDUE ' + state.daysOver + 'D' };
+  if (state.status === 'overdue' && state.daysOver >= 2) return { c: 'var(--warn)', bg: 'var(--warn-tint)', label: 'OVERDUE ' + state.daysOver + 'D' };
+  if (state.status === 'overdue')                        return { c: 'var(--muted)', bg: 'var(--surface-2)', label: 'OVERDUE' };
+  if (state.status === 'due')                            return { c: 'var(--muted)', bg: 'var(--surface-2)', label: 'DUE TODAY' };
   return { c: 'var(--muted)', bg: 'var(--surface-2)', label: 'UPCOMING' };
 }
 
@@ -286,6 +286,7 @@ function RoutineCard({ rule, state, onEdit }) {
   const acc = statusAccent(state);
   return (
     <div className="card fade-up" role="button" tabIndex={0}
+      aria-label={'Edit routine: ' + rule.name + '. ' + acc.label.toLowerCase() + ', ' + recurrenceText(rule) + ', ' + lastDoneText(state, Date.now())}
       onClick={() => onEdit(rule)}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEdit(rule); } }}
       style={{ padding: '14px 16px', position: 'relative', cursor: 'pointer' }}>
@@ -351,26 +352,57 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
     }
   };
 
+  // The sheet had no dialog role, no Escape, and no focus handling — it was a
+  // fixed-position div over a fully tabbable page. Keep it simple: announce it as
+  // a modal, close on Escape, move focus in on open and keep Tab inside.
+  const sheetRef = React.useRef(null);
+  const titleId = 'routine-editor-title';
+  React.useEffect(() => {
+    const prev = document.activeElement;
+    const el = sheetRef.current;
+    if (el) {
+      const first = el.querySelector('input, select, button, textarea');
+      if (first) first.focus();
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); onCancel(); return; }
+      if (e.key !== 'Tab' || !el) return;
+      const f = Array.from(el.querySelectorAll('input, select, button, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter(n => !n.disabled && n.offsetParent !== null);
+      if (!f.length) return;
+      const firstEl = f[0], lastEl = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === firstEl) { e.preventDefault(); lastEl.focus(); }
+      else if (!e.shiftKey && document.activeElement === lastEl) { e.preventDefault(); firstEl.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (prev && prev.focus) prev.focus();
+    };
+  }, [onCancel]);
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(12,12,13,0.55)', zIndex: 200, display: 'flex', alignItems: 'flex-end', animation: 'fadeUp 0.18s ease both' }} onClick={onCancel}>
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', width: '100%', borderRadius: '20px 20px 0 0', maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 -8px 30px rgba(0,0,0,0.25)' }}>
+      <div ref={sheetRef} role="dialog" aria-modal="true" aria-labelledby={titleId}
+        onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', width: '100%', borderRadius: '20px 20px 0 0', maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 -8px 30px rgba(0,0,0,0.25)' }}>
         <div style={{ padding: '14px 18px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--hairline)' }}>
-          <div className="t-title" style={{ fontSize: 16 }}>{initial ? 'Edit routine' : 'New routine'}</div>
-          <button onClick={onCancel} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer', padding: 4 }}>×</button>
+          <h2 id={titleId} className="t-title" style={{ fontSize: 16, fontWeight: 600 }}>{initial ? 'Edit routine' : 'New routine'}</h2>
+          <button type="button" onClick={onCancel} aria-label="Close without saving"
+            style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer', width: 44, height: 44, borderRadius: 8 }}>×</button>
         </div>
 
         <div style={{ padding: 16 }}>
           {/* Name */}
           <div className="form-field">
-            <div className="form-label">Name</div>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. 500ml acid"
+            <label className="form-label" htmlFor="routine-name">Name</label>
+            <input id="routine-name" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. 500ml acid"
               style={{ fontFamily: 'Geist', fontSize: 15, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
 
           {/* Match type */}
           <div className="form-field">
-            <div className="form-label">What counts as done?</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, marginTop: 6 }}>
+            <div className="form-label" id="routine-match-label">What counts as done?</div>
+            <div role="radiogroup" aria-labelledby="routine-match-label" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, marginTop: 6 }}>
               {[
                 { id: 'chemical',  label: 'Chemical' },
                 { id: 'aiper',     label: 'Pool cleaner' },
@@ -378,7 +410,8 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
                 { id: 'watertest', label: 'Water test' },
                 { id: 'note',      label: 'Note' },
               ].map(o => (
-                <button key={o.id} onClick={() => setLogType(o.id)}
+                <button type="button" key={o.id} onClick={() => setLogType(o.id)}
+                  role="radio" aria-checked={logType === o.id}
                   style={{ background: logType === o.id ? 'var(--ink)' : 'var(--surface)', color: logType === o.id ? '#fff' : 'var(--ink-2)', border: '1px solid', borderColor: logType === o.id ? 'var(--ink)' : 'var(--hairline)', borderRadius: 10, padding: '8px 4px', fontSize: 11.5, fontWeight: 500, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                   <Icon name={KIND_ICON[o.id]} size={16} />{o.label}
                 </button>
@@ -388,23 +421,23 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
 
           {logType === 'chemical' && (
             <div className="form-field">
-              <div className="form-label">Chemical</div>
-              <select value={chemical} onChange={e => setChemical(e.target.value)}
-                style={{ fontFamily: 'Geist', fontSize: 15, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%', appearance: 'none', cursor: 'pointer' }}>
-                {chemicals.map(c => <option key={c}>{c}</option>)}
+              <label className="form-label" htmlFor="routine-chemical">Chemical</label>
+              <select id="routine-chemical" className="form-native-select" value={chemical} onChange={e => setChemical(e.target.value)}>
+                {chemicals.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           )}
 
           {/* Schedule type */}
           <div className="form-field">
-            <div className="form-label">When?</div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <div className="form-label" id="routine-when-label">When?</div>
+            <div role="radiogroup" aria-labelledby="routine-when-label" style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               {[
                 { id: 'dow', label: 'On certain days' },
                 { id: 'interval', label: 'Every N days' },
               ].map(o => (
-                <button key={o.id} onClick={() => setSched(o.id)}
+                <button type="button" key={o.id} onClick={() => setSched(o.id)}
+                  role="radio" aria-checked={schedType === o.id}
                   style={{ flex: 1, background: schedType === o.id ? 'var(--ink)' : 'var(--surface)', color: schedType === o.id ? '#fff' : 'var(--ink-2)', border: '1px solid', borderColor: schedType === o.id ? 'var(--ink)' : 'var(--hairline)', borderRadius: 10, padding: '10px 8px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>
                   {o.label}
                 </button>
@@ -414,41 +447,45 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
 
           {schedType === 'dow' ? (
             <div className="form-field">
-              <div className="form-label">Days of week</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, marginTop: 6 }}>
+              <div className="form-label" id="routine-days-label">Days of week</div>
+              {/* The seven toggles announced as "S, M, T, W, T, F, S" with no
+                  state and two indistinguishable pairs. Full day name + pressed
+                  state, and the visible letter is decorative. */}
+              <div role="group" aria-labelledby="routine-days-label" style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 5, marginTop: 6 }}>
                 {DOW_INITIAL.map((l, i) => {
                   const on = days.includes(i);
                   return (
-                    <button key={i} onClick={() => toggleDay(i)}
-                      style={{ aspectRatio: '1', background: on ? 'var(--ink)' : 'var(--surface)', color: on ? '#fff' : 'var(--ink-2)', border: '1px solid', borderColor: on ? 'var(--ink)' : 'var(--hairline)', borderRadius: 10, fontFamily: 'Geist', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
-                      {l}
+                    <button type="button" key={i} onClick={() => toggleDay(i)}
+                      aria-pressed={on} aria-label={DOW_LABELS[i]}
+                      style={{ aspectRatio: '1', minHeight: 40, background: on ? 'var(--ink)' : 'var(--surface)', color: on ? '#fff' : 'var(--ink-2)', border: '1px solid', borderColor: on ? 'var(--ink)' : 'var(--hairline)', borderRadius: 10, fontFamily: 'Geist', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                      <span aria-hidden="true">{l}</span>
                     </button>
                   );
                 })}
               </div>
-              <div style={{ color: 'var(--faint)', fontSize: 11, marginTop: 8, fontFamily: 'Geist Mono, ui-monospace, monospace' }}>
+              <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 8, fontFamily: 'Geist Mono, ui-monospace, monospace' }}>
                 {days.length === 0 ? 'pick at least one' : days.map(d => DOW_SHORT[d]).join(', ')}
               </div>
             </div>
           ) : (
             <div className="form-field">
-              <div className="form-label">Every</div>
+              <label className="form-label" htmlFor="routine-interval">Every</label>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 2 }}>
-                <input type="number" min={1} max={365} value={interval} onChange={e => setInt(e.target.value)}
+                <input id="routine-interval" type="number" min={1} max={365} value={interval} onChange={e => setInt(e.target.value)}
                   style={{ fontFamily: 'Geist', fontSize: 22, fontWeight: 600, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: 70 }} />
                 <span style={{ color: 'var(--muted)', fontSize: 14 }}>day{(parseInt(interval, 10) || 1) !== 1 ? 's' : ''} since last log</span>
               </div>
             </div>
           )}
 
-          <button onClick={save} className="btn-primary" style={{ marginTop: 12 }}
+          <button type="button" onClick={save} className="btn-primary" style={{ marginTop: 12 }}
             disabled={schedType === 'dow' && days.length === 0}>
             {initial ? 'Save changes' : 'Add routine'}
           </button>
           {initial && (
             <div style={{ textAlign: 'center', marginTop: 14, paddingBottom: 6 }}>
-              <button onClick={remove}
-                style={{ background: 'transparent', border: 'none', color: 'var(--bad)', fontSize: 12.5, fontWeight: 500, fontFamily: 'Geist, sans-serif', cursor: 'pointer', padding: '8px 14px' }}>
+              <button type="button" onClick={remove}
+                style={{ background: 'transparent', border: 'none', color: 'var(--bad)', fontSize: 12.5, fontWeight: 500, fontFamily: 'Geist, sans-serif', cursor: 'pointer', padding: '10px 16px', minHeight: 44 }}>
                 Delete routine
               </button>
             </div>
@@ -471,20 +508,25 @@ function UpcomingChips({ rules, entries, onNav }) {
   if (shown.length === 0) return null;
   return (
     <div style={{ display: 'flex', gap: 6, padding: '4px 18px 0', flexWrap: 'wrap' }}>
-      {shown.map(({ r, s }) => (
-        <div key={r.id} onClick={onNav} style={{
-          background: 'var(--surface)', border: '1px dashed var(--hairline)',
-          borderRadius: 999, padding: '4px 10px 4px 8px',
-          fontFamily: 'Geist', fontSize: 11.5, color: 'var(--muted)',
-          display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-        }}>
-          <span style={{ color: 'var(--muted)', display: 'inline-flex' }}><Icon name={KIND_ICON[ruleKind(r)]} size={12} /></span>
-          <span style={{ color: 'var(--ink-2)', fontWeight: 500 }}>{r.name.replace(/^(Add\s+)?\d+(?:\.\d+)?\s*(mL|ml|L|g|kg)\s*(of\s+)?/i, '')}</span>
-          <span style={{ color: 'var(--muted)', fontFamily: 'Geist Mono, ui-monospace, monospace', fontSize: 10 }}>
-            {shortDueChipText(s)}
-          </span>
-        </div>
-      ))}
+      {shown.map(({ r, s }) => {
+        const short = r.name.replace(/^(Add\s+)?\d+(?:\.\d+)?\s*(mL|ml|L|g|kg)\s*(of\s+)?/i, '');
+        return (
+          <button type="button" key={r.id} onClick={onNav}
+            aria-label={short + ', ' + shortDueChipText(s) + '. Open routines'}
+            style={{
+              background: 'var(--surface)', border: '1px dashed var(--hairline)',
+              borderRadius: 999, padding: '5px 10px 5px 8px',
+              fontFamily: 'Geist', fontSize: 11.5, color: 'var(--muted)',
+              display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+            }}>
+            <span aria-hidden="true" style={{ color: 'var(--muted)', display: 'inline-flex' }}><Icon name={KIND_ICON[ruleKind(r)]} size={12} /></span>
+            <span aria-hidden="true" style={{ color: 'var(--ink-2)', fontWeight: 500 }}>{short}</span>
+            <span aria-hidden="true" style={{ color: 'var(--muted)', fontFamily: 'Geist Mono, ui-monospace, monospace', fontSize: 10 }}>
+              {shortDueChipText(s)}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

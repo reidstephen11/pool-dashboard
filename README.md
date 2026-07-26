@@ -17,7 +17,7 @@ recurring maintenance (routines), and keeps a full activity history.
 | `styles.css` | Design tokens and all component CSS |
 | `notify-core.js` | Reminder logic shared by the page and the service worker: IndexedDB store, "what's due" diff, `showNotification`. Plain JS (runs in both contexts) |
 | `notify.js` | Page-side glue — `window.PoolNotify` (permission, SW + periodic-sync registration, schedule mirroring). Loads after `notify-core.js` |
-| `sw.js` | Service worker — background routine checks (Periodic Background Sync) + notification clicks. No fetch handler |
+| `sw.js` | Service worker — offline cache (see below) + background routine checks (Periodic Background Sync) + notification clicks |
 | `manifest.webmanifest` · `icons/` | PWA manifest and app/notification icons (makes the app installable) |
 | `dist/index.standalone.html` | Old fully-inlined offline build (v4, stale — kept for reference until regenerated) |
 
@@ -86,9 +86,79 @@ the app is open and it catches up on focus. The feature is fully feature-detecte
 notifications, service workers or IndexedDB are unavailable/blocked, the toggle hides
 itself and the app behaves exactly as before.
 
+Note that the service worker itself is registered on every load, because it also
+backs the offline cache — registering it asks the user for nothing. Notification
+*permission* is still requested only when the Reminders toggle is switched on.
+
+## Offline
+
+The service worker registers on every load (not just when reminders are enabled)
+and precaches the app shell plus the version-pinned CDN bundles, so the app opens
+with no connection — which is the normal case standing next to the pool.
+
+Two cache strategies, chosen so that going offline can never mean running stale
+code:
+
+- **Same-origin app files are network-first.** A deploy lands on the next load
+  exactly as it did before the service worker existed; the cache is only a
+  fallback for when the network fails. This matters in a buildless app, where a
+  stale `app.jsx` served against a fresh `index.html` would be a real hazard.
+- **CDN bundles and Google Fonts are cache-first.** Every one of those URLs
+  carries an immutable version (`react@18.3.1`, `pdf.js/3.11.174`, …) so a cached
+  copy cannot be wrong, and this is where nearly all the load time goes.
+
+Anything else is not intercepted. Bump `CACHE` in `sw.js` when the precache list
+changes.
+
 ## PDF parsing
 
-Client-side via PDF.js (loaded on demand from cdnjs). The parser is tuned to
-the current Poolwerx report format: metric values appear before their labels,
-recommendations are extracted from "Add X of Y" lines. See
-`parsePoolwerxPDF()` in `app.jsx`.
+Client-side via PDF.js (loaded on demand from cdnjs, with a 20s timeout so a
+stalled CDN can't wedge the upload). The parser is tuned to the current Poolwerx
+report format. See `parsePoolwerxPDF()` in `app.jsx`.
+
+The results table reads `CURRENT  PREVIOUS  LABEL  RANGE`, so a metric's value
+sits *before* its label and the first of the two numbers is the new reading. Six
+consecutive real reports confirm this: each one's PREVIOUS column matches the
+value parsed from the report before it, for all 8 metrics.
+
+Recommendations are numbered sections (`1  PH`, `2  TOTAL CHLORINE`), and **one
+action is produced per section** — not per dose. Most sections carry an
+"Add X of Y" line, but some are plain instructions ("Reduce your chlorinator
+hours/level"), and those appear on four of the six real reports, always while
+chlorine reads well over target. Scanning for doses dropped every one of them.
+
+Guardrails worth knowing about before changing it:
+
+- Metric values are only read from the text **before** `RECOMMENDATIONS`. That
+  block numbers its sections (`1 PH`, `2 COMBINED CHLORINE`), and a
+  case-insensitive whole-document search will happily return a section number as
+  a metric value.
+- Each metric has a **list** of label spellings (`METRIC_LABELS`), most specific
+  first, because the results table abbreviates some of them (`Combined Cl`) while
+  the recommendations spell them out.
+- Numbers are parsed with `parseReportNum`, which handles thousands separators
+  (`4,200`) and returns `null` rather than `NaN` for junk.
+- There is deliberately **no** "number after the label" fallback. It used to
+  match a label as a prefix and return the target range's low bound as the
+  reading — a fabricated value that always looked plausible. A metric that can't
+  be read is `null`, surfaces as "Not in this report" on the Chemistry screen, and
+  is counted in the upload toast ("Loaded 6 of 8 results").
+- A section heading is `<number><gap><ALL CAPS>`. The real reports always use a
+  2+ space gap, which is what keeps the pattern out of dose text; a single space
+  is still accepted, but then a unit blocklist stops "Add 20 ML of …" being read
+  as section 20 named "ML".
+- The dose line is separated from its explanation by a run of 2+ spaces (it is
+  its own line in the PDF), so the dose text stops there rather than at a
+  character budget — a budget ran on into the explanation and cut it mid-word.
+- A recommendation is attributed to a metric via `PARAM_METRIC`, matching on the
+  section heading. Don't go back to substring matching on metric labels: "ph" is
+  a substring of "phosphates" (a phosphate dose was captioned "pH is 7.6" and
+  demoted to MED), and "total" in "TOTAL CHLORINE" matches the "Total Alk"
+  metric. The report also abbreviates alkalinity as "TOT. ALKALINITY (ADJUSTED)".
+- An upload that yields no metrics and no recommendations is rejected without
+  touching state, and a report older than the current one asks for confirmation
+  first.
+- The report carries 12 rows; the app tracks 8. Total Chlorine, Total Hardness,
+  Total Copper and Temperature are deliberately not modelled — Total Hardness has
+  equalled Calcium Hardness on every report so far, and the Total Chlorine advice
+  is surfaced through Free Chlorine, which is tracked.

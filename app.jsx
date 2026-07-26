@@ -5,26 +5,85 @@ const KIND_ICON = window.RoutinesAPI.KIND_ICON;
 const entryKind = window.RoutinesAPI.entryKind;
 
 // Normalize dose text from the Poolwerx PDF: consistent units ("mls" → "mL").
+// Both rules are case-insensitive: the report is not consistent about unit case,
+// and an uppercase "2.2 KG" used to pass through unnormalised.
 function normalizeDose(s) {
   return (s || '')
     .replace(/\b(\d+(?:\.\d+)?)\s*mls?\b/gi, '$1 mL')
-    .replace(/\b(\d+(?:\.\d+)?)\s*(kg|g|l)\b/g, (m, n, u) => n + ' ' + (u === 'l' ? 'L' : u))
+    .replace(/\b(\d+(?:\.\d+)?)\s*(kg|g|l)\b/gi, (m, n, u) => n + ' ' + (u.toLowerCase() === 'l' ? 'L' : u.toLowerCase()))
     .replace(/\s+/g, ' ')
     .trim();
 }
 
+// Numbers on the report carry thousands separators ("4,200 ppm"), which a
+// [\d.]+ capture cannot represent — it used to read 4,200 as 200. Returns null
+// rather than NaN for junk (a lone "."), so "didn't parse" stays distinguishable
+// from "parsed as zero".
+function parseReportNum(s) {
+  if (s == null) return null;
+  const cleaned = String(s).replace(/,/g, '').replace(/^\.+|\.+$/g, '');
+  if (!/\d/.test(cleaned)) return null;
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Labels as they may appear in the results table, most specific first. The table
+// abbreviates some of them ("Combined Cl") while the recommendations block spells
+// them out, so each metric gets a list of spellings to try.
+const METRIC_LABELS = {
+  ph:     ['pH'],
+  freeCl: ['Free Chlorine', 'Free Cl'],
+  combCl: ['Combined Chlorine', 'Combined Cl'],
+  salt:   ['Salt'],
+  alk:    ['Total Alkalinity', 'Total Alk'],
+  caHard: ['Calcium Hardness', 'Ca Hardness'],
+  cya:    ['Cyanuric Acid', 'Cyanuric'],
+  phos:   ['Phosphates', 'Phosphate'],
+};
+
+// The heading of a numbered recommendation ("3  CALCIUM HARDNESS"), mapped to
+// the metric it is about. This used to be done by testing whether the heading
+// contained a metric label's first word, which was wrong in both directions:
+// "ph" is a substring of "phosphates", so a phosphate dose was explained as a
+// pH problem — and demoted from HIGH to MED — whenever pH happened to be
+// borderline too; and "total" in "TOTAL CHLORINE" matches the "Total Alk"
+// metric. Order matters: the more specific patterns come first.
+const PARAM_METRIC = [
+  [/COMBINED\s*CHLORINE/i, 'ccl'],
+  [/CHLORINE/i,            'fcl'],  // incl. "TOTAL CHLORINE" — advice there is to lower the chlorinator
+  [/PHOSPHATE/i,           'phos'],
+  [/CYANURIC|SUNBLOCK/i,   'cya'],
+  [/ALKALIN|^TOT\b/i,      'alk'],  // the report abbreviates it "TOT. ALKALINITY (ADJUSTED)"
+  [/HARDNESS|CALCIUM/i,    'cah'],
+  [/SALT/i,                'salt'],
+  [/^PH$/i,                'ph'],
+];
+function metricIdForParam(param) {
+  const p = (param || '').trim();
+  for (const [re, id] of PARAM_METRIC) if (re.test(p)) return id;
+  return null;
+}
+
 // ─── PDF Parser (PDF.js) ────────────────────────
-async function parsePoolwerxPDF(file) {
-  if (!window.pdfjsLib) {
-    await new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-      s.onload = res; s.onerror = rej;
-      document.head.appendChild(s);
-    });
+// Loads pdf.js from cdnjs on demand. The 20s cap matters: without it a stalled
+// CDN request leaves the upload button stuck on "Parsing…" with no way out.
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    const timer = setTimeout(() => { s.onload = s.onerror = null; rej(new Error('pdfjs-timeout')); }, 20000);
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = () => { clearTimeout(timer); res(); };
+    s.onerror = () => { clearTimeout(timer); rej(new Error('pdfjs-unreachable')); };
+    document.head.appendChild(s);
+  }).then(() => {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
+  });
+}
+
+async function parsePoolwerxPDF(file) {
+  await loadPdfJs();
   const buf = await file.arrayBuffer();
   const pdfDoc = await window.pdfjsLib.getDocument({ data: buf }).promise;
   let txt = '';
@@ -33,26 +92,38 @@ async function parsePoolwerxPDF(file) {
     const content = await page.getTextContent();
     txt += content.items.map(item => item.str).join(' ') + '\n';
   }
-  console.log('=== PDF RAW TEXT ===\n' + txt + '\n=== END ===');
+  // NOTE: never log `txt` — a Poolwerx report carries the customer's name and
+  // street address, and this app runs on a shared family phone.
 
-  // Helper: find value before a label.
+  // Metric values are only ever read from the text BEFORE "RECOMMENDATIONS".
+  // That block numbers its sections ("1 PH", "2 COMBINED CHLORINE"), and a
+  // case-insensitive whole-document search happily reads a section number as the
+  // metric value — asking for "Combined Chlorine" against a table that
+  // abbreviates it returned 2 ppm against a 0–0.2 target.
+  const recsStart = /RECOMMENDATIONS?/i.exec(txt);
+  const tableTxt = recsStart ? txt.slice(0, recsStart.index) : txt;
+
   // Poolwerx PDF table reading order is: CURRENT  PREVIOUS  LABEL  RANGE
   // e.g. "7.4  8.1  pH  7.2-7.6"  →  current = 7.4, previous = 8.1
   // We want the FIRST of the two numbers (the current measured value, shown
   // in the colored box on the report).
-  const grabBefore = (label) => {
-    // Primary: capture both numbers before the label, take the first.
-    const rePair = new RegExp('([\\d.]+)\\s+([\\d.]+)\\s+' + label + '\\b', 'i');
-    const mPair = txt.match(rePair);
-    if (mPair) return parseFloat(mPair[1]);
-    // Fallback: only one number before the label.
-    const reSingle = new RegExp('([\\d.]+)\\s+' + label + '\\b', 'i');
-    const mSingle = txt.match(reSingle);
-    if (mSingle) return parseFloat(mSingle[1]);
-    // Last resort: number after label.
-    const reAfter = new RegExp(label + '[\\s\\S]{0,30}?([\\d.]+)', 'i');
-    const mAfter = txt.match(reAfter);
-    return mAfter ? parseFloat(mAfter[1]) : null;
+  //
+  // There is deliberately no "number after the label" fallback any more. It
+  // lacked the \b the other two branches have, so it matched a label as a prefix
+  // ("Total Alk" inside "Total Alkalinity 80-120") and returned the target
+  // range's low bound as the reading. A fabricated value that always looks
+  // plausible is worse than null: null is reported to the user, 80 is not.
+  const NUM = '([\\d,.]+)';
+  const grabBefore = (key) => {
+    for (const label of METRIC_LABELS[key]) {
+      const mPair = tableTxt.match(new RegExp(NUM + '\\s+' + NUM + '\\s+' + label + '\\b', 'i'));
+      const pair = mPair ? parseReportNum(mPair[1]) : null;
+      if (pair != null) return pair;
+      const mSingle = tableTxt.match(new RegExp(NUM + '\\s+' + label + '\\b', 'i'));
+      const single = mSingle ? parseReportNum(mSingle[1]) : null;
+      if (single != null) return single;
+    }
+    return null;
   };
 
   // Parse date
@@ -60,69 +131,131 @@ async function parsePoolwerxPDF(file) {
   const date = dateM ? dateM[1] : 'Unknown date';
 
   // Each metric value appears before its label in the Poolwerx PDF table
-  const ph     = grabBefore('pH');
-  const freeCl = grabBefore('Free Chlorine');
-  const combCl = grabBefore('Combined Chlorine');
-  const salt   = grabBefore('Salt');
-  const alk    = grabBefore('Total Alk');
-  const caHard = grabBefore('Calcium Hardness');
-  const cya    = grabBefore('Cyanuric Acid');
-  const phos   = grabBefore('Phosphates');
+  const ph     = grabBefore('ph');
+  const freeCl = grabBefore('freeCl');
+  const combCl = grabBefore('combCl');
+  const salt   = grabBefore('salt');
+  const alk    = grabBefore('alk');
+  const caHard = grabBefore('caHard');
+  const cya    = grabBefore('cya');
+  const phos   = grabBefore('phos');
 
-  const lsiM = txt.match(/([-\d.]+)\s*LANGELIER/i);
-  const lsi  = lsiM ? parseFloat(lsiM[1]) : null;
+  const lsiM = tableTxt.match(/(-?[\d.]+)\s*LANGELIER/i);
+  const lsi  = lsiM ? (Number.isFinite(parseFloat(lsiM[1])) ? parseFloat(lsiM[1]) : null) : null;
 
-  const poolM = txt.match(/(\d[\d,]+)\s*L/);
-  const pool  = poolM ? poolM[0] : '';
+  // Pool volume. The report prints it as "POOL   40,000   L", so \bpool\b is the
+  // real anchor (\b matters — "Poolwerx" is in the letterhead twice). A bare
+  // "digits then L" also matches the postcode in the customer's address
+  // ("Brisbane QLD 4000 Lot 5" → "4000 L"), so the fallback insists on a
+  // comma-grouped number — which then misses an uncommaed "8000 L" spa, hence
+  // the anchor doing the real work.
+  const poolM = txt.match(/(?:\bpool\b|volume|capacity|litres|liters)\D{0,20}(\d[\d,]*)\s*(?:L\b|litres|liters)/i)
+             || txt.match(/(\d{1,3}(?:,\d{3})+)\s*L\b/);
+  const pool  = poolM ? poolM[1] + ' L' : '';
 
-  // Parse RECOMMENDATIONS section — extract "Add X of Y" lines
+  // Parse RECOMMENDATIONS — ONE action per numbered section.
+  //
+  // The report numbers its recommendations ("1  PH", "2  TOTAL CHLORINE") and
+  // most, but not all, of them carry an "Add X of Y" dose. Scanning for doses
+  // and attributing each to a heading therefore dropped every recommendation
+  // that is a plain instruction — "TOTAL CHLORINE · Reduce your chlorinator
+  // hours/level" appears on four of the six real reports, always while Free
+  // Chlorine reads well over target, so the app showed the problem and no way
+  // to act on it. Sections are extracted first now, and a dose is looked for
+  // inside each one rather than the other way round.
   const recs = [];
-  const recsM = txt.match(/RECOMMENDATIONS?[\s\S]*?(?:ADDITIONAL|PRODUCT|$)/i);
-  if (recsM) {
-    const recsText = recsM[0];
-    // Split into numbered sections: "1 PH", "2 COMBINED CHLORINE", etc.
-    const sections = recsText.split(/\b(\d+)\s+([A-Z][A-Z\s]+?)(?=\s*Add|\s*\d+\s+[A-Z])/g);
-    // More reliable: just scan for "Add {number}{unit}" patterns — these are the dose lines
-    // e.g. "Add 500 mls of Hydrochloric Acid" or "Add 2.2 kg of Vitalyse Calcium Up"
-    const doseRe = /Add\s+[\d.]+\s*(?:mls?|g|kg|L|tabs?)\s+of\s+[^.\n]{3,60}/gi;
-    const doseLines = recsText.match(doseRe) || [];
-    
-    // Also try "Add {number}{unit}" without "of"
-    const doseRe2 = /Add\s+[\d.]+\s*(?:mls?|g|kg|L|tabs?)[^.\n]{0,50}/gi;
-    
-    // Pair each dose with its parameter section header
-    const sectionBlocks = recsText.split(/(?=\b\d+\s+[A-Z]{2})/);
-    sectionBlocks.forEach(block => {
-      // Parameter name: first ALL-CAPS word(s) at start of block
-      const paramM = block.match(/^\d+\s+([A-Z][A-Z\s]+?)(?:\s+Add|\n)/);
-      // Dose: "Add {number} {unit} of {chemical}"
-      // Match "Add {qty} {unit} of {product}" — stop before any second verb (Dissolve, Filter, Clean, etc.)
-      const raw = block.match(/Add\s+[\d.]+\s*(?:mls?|g|kg|L|tabs?)\s+(?:of\s+)?[A-Za-z][^.\n]{2,60}/i);
-      const doseM = raw ? [raw[0].replace(/\s+(Dissolve|Filter|Clean|Backwash|Increase|away|in a bucket|Add\b)[\s\S]*/i, '').trim()] : null;
-      if (doseM) {
-        recs.push({
-          action: doseM[0].trim(),
-          param: paramM ? paramM[1].trim() : '',
-        });
+  if (recsStart) {
+    const after = txt.slice(recsStart.index + recsStart[0].length);
+    // Terminators are matched case-SENSITIVELY: these are all-caps section
+    // headings, and a lowercase "product" in ordinary prose used to truncate
+    // the whole section. The disclaimer sentence ends the recommendations on
+    // every report seen; without it, reports that carry no ADDITIONAL NOTES run
+    // on into the footer and the shop's street address is scanned as a heading.
+    const endM = /\bADDITIONAL\b|\bPRODUCT\b|The accuracy of this test/.exec(after);
+    const recsText = endM ? after.slice(0, endM.index) : after;
+
+    // A heading is a number, a gap, then all-caps words. In the real reports the
+    // gap is always 2+ spaces, which is what keeps this away from dose text
+    // ("Add 400 mls", "for 4-6 hours"). A single space is still accepted so a
+    // reformatted report doesn't silently fall back to dose-only scanning, but
+    // then the unit blocklist has to rule out "Add 20 ML of …" being read as
+    // section 20 named "ML". Note \d{1,2} already excludes "500 ML": the digits
+    // must be followed by the gap, and "500" cannot be.
+    const UNIT_WORD = /^(?:ML|MLS|L|G|KG|MG|TAB|TABS)$/;
+    // Names carry dots and brackets — "TOT. ALKALINITY (ADJUSTED)" — and the
+    // (?![a-z]) guard ends the name at the first ordinary word, so the "A" of a
+    // following "Add …" is not read as part of it.
+    const HEAD_NAME = /^[A-Z][A-Z.()]*(?:\s+[A-Z(][A-Z.()]*(?![a-z]))*/;
+    const heads = [];
+    for (const m of recsText.matchAll(/(?:^|\s)(\d{1,2})(\s+)(?=[A-Z]{2})/g)) {
+      const at = m.index + m[0].length;
+      const nm = HEAD_NAME.exec(recsText.slice(at));
+      if (!nm || !nm[0]) continue;
+      const name = nm[0].trim();
+      if (m[2].length < 2 && UNIT_WORD.test(name.split(/\s+/)[0])) continue;
+      heads.push({ at: m.index, from: at + nm[0].length, name });
+    }
+
+    // In the PDF the dose sits on its own line, so pdf.js separates it from the
+    // explanation that follows with a run of two or more spaces. Stopping there
+    // is both simpler and more accurate than the old character budget, which
+    // ran into the explanation and truncated it mid-word ("…Vitalyse Shock N Swi").
+    const UNIT = '(?:mls?|millilitres?|milliliters?|g|grams?|kg|kilograms?|L|litres?|liters?|tabs?|tablets?)';
+    const DOSE = 'Add\\s+[\\d,.]+\\s*' + UNIT + '\\b(?:(?! {2})[^.\\n]){0,80}';
+    const doseRe = new RegExp(DOSE, 'i');
+
+    const tidy = (s) => s.replace(/\s+/g, ' ').replace(/[\s,;:.]+$/, '').trim();
+
+    for (let i = 0; i < heads.length; i++) {
+      const body = recsText.slice(heads[i].from, i + 1 < heads.length ? heads[i + 1].at : recsText.length);
+      const dose = doseRe.exec(body);
+      let action;
+      if (dose) {
+        // On the real two-space format the run above already stops at the end
+        // of the dose line; this trim is the safety net for a single-spaced
+        // report, where it runs on into the instructions that follow.
+        action = tidy(dose[0].replace(/\s+(?:Dissolve|Filter|Clean|Backwash|Increase|Reduce|Retest|Turn off|A shock dose|away|in a bucket|Add\b)[\s\S]*/i, ''));
+      } else {
+        // No dose: the recommendation is an instruction. Its first sentence is
+        // the actionable part ("Reduce your chlorinator hours/level"); the rest
+        // is elaboration.
+        const prose = body.replace(/\s+/g, ' ').trim();
+        const first = prose.match(/^[^.]*\./);
+        action = tidy(first ? first[0] : prose);
+        if (action.length > 90) action = action.slice(0, 90).replace(/\s+\S*$/, '') + '…';
       }
-    });
-    
-    // Fallback: use the doseRe matches directly
-    if (recs.length === 0) {
-      doseLines.forEach(a => recs.push({ action: a.trim(), param: '' }));
+      if (action) recs.push({ action, param: heads[i].name });
+    }
+
+    // Safety net for a report that doesn't number its recommendations: fall
+    // back to scanning the whole block for doses.
+    if (!heads.length) {
+      for (const m of recsText.matchAll(new RegExp(DOSE, 'gi'))) {
+        const action = tidy(m[0]);
+        if (action) recs.push({ action, param: '' });
+      }
     }
   }
 
-  return { date, pool, lsi, ph, freeCl, combCl, salt, alk, caHard, cya, phos, recs, raw: txt };
+  const metricsParsed = [ph, freeCl, combCl, salt, alk, caHard, cya, phos]
+    .filter(v => v != null).length;
+
+  return { date, pool, lsi, ph, freeCl, combCl, salt, alk, caHard, cya, phos, recs, metricsParsed, metricsTotal: 8 };
 }
 
-// Status helper
-function calcStatus(val, lo, hi) {
+// Status helper. 'warn' means "inside the target band but close to an edge" —
+// but only for an edge that represents a real limit. Combined Chlorine and
+// Phosphates both target 0–0.2, where 0 is the IDEAL reading rather than a near
+// miss; warning on it made every clean report show phantom issues and a red
+// "2 issues" pill on a pool where nothing was wrong. An edge that coincides with
+// the metric's own floor/ceiling is therefore not treated as a boundary to
+// approach.
+function calcStatus(val, lo, hi, min, max) {
   if (val === null || val === undefined) return 'ok';
   if (val < lo || val > hi) return 'bad';
-  // warn if within 5% of the range width from either boundary
   const margin = (hi - lo) * 0.05;
-  if (val < lo + margin || val > hi - margin) return 'warn';
+  if (val < lo + margin && !(min != null && lo <= min)) return 'warn';
+  if (val > hi - margin && !(max != null && hi >= max)) return 'warn';
   return 'ok';
 }
 
@@ -139,6 +272,10 @@ const METRIC_DEFS = [
   { id: 'phos', label: 'Phosphates',    lo: 0,   hi: 0.2, unit: 'ppm', min: 0,   max: 0.5  },
 ];
 
+// Text equivalent for the status colour, used in accessible names so the
+// pass/warn/fail signal isn't carried by hue alone.
+const STATUS_WORD = { ok: 'in range', warn: 'borderline', bad: 'out of range' };
+
 const EMPTY_TEST = {
   date: null,
   pool: '',
@@ -152,16 +289,28 @@ const TODOS = [];
 const PH_HISTORY = [];
 
 // ─── Trend Chart ────────────────────────────────
-function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5 }) {
-  if (!data || data.length < 2) {
+function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5, unit = '', label = 'pH' }) {
+  data = (data || []).filter(d => d && typeof d.val === 'number' && Number.isFinite(d.val));
+  if (data.length < 2) {
     return (
-      <div style={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b0bac8', fontSize: 12 }}>
+      <div style={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>
         Need at least 2 tests to show a trend
       </div>
     );
   }
   // Normalize: ensure lo <= hi
   if (lo > hi) { const t = lo; lo = hi; hi = t; }
+
+  // The visible domain used to be hardcoded to 7.0–8.5, so a reading outside it
+  // (a pH of 6.8, or any of the other metrics) was plotted above or below the
+  // card with no indication it had gone off-scale. Widen the domain to cover the
+  // data and the target band, with a little headroom.
+  const vals = data.map(d => d.val);
+  const dataMin = Math.min(...vals, lo, phMin);
+  const dataMax = Math.max(...vals, hi, phMax);
+  const span = dataMax - dataMin || 1;
+  phMin = dataMin - span * 0.08;
+  phMax = dataMax + span * 0.08;
 
   const W = 295, H = 90;
   const pad = { l: 28, r: 8, t: 10, b: 20 };
@@ -182,8 +331,17 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5 }) {
   // Tick labels at quartiles of [phMin, phMax]
   const ticks = [phMin, phMin + (phMax - phMin) * 0.33, phMin + (phMax - phMin) * 0.66, phMax];
 
+  const last = data[data.length - 1];
+  const first = data[0];
+  const dir = last.val > first.val ? 'rising' : last.val < first.val ? 'falling' : 'flat';
+  const summary = label + ' over the last ' + data.length + ' tests, ' + dir + ' from ' +
+    first.val + unit + ' in ' + first.label + ' to ' + last.val + unit + ' in ' + last.label +
+    '. Target range ' + lo + ' to ' + hi + unit + '. ' +
+    data.filter(d => d.val < lo || d.val > hi).length + ' of ' + data.length + ' outside target.';
+
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible', display: 'block' }}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible', display: 'block' }}
+      role="img" aria-label={summary}>
       {/* Target band */}
       <rect x={pad.l} y={bandTop} width={cW} height={bandH} fill="#087299" opacity={0.08} rx={2} />
       <line x1={pad.l} y1={loY} x2={pad.l + cW} y2={loY} stroke="#087299" strokeWidth={1} strokeDasharray="3 3" opacity={0.5} />
@@ -204,14 +362,15 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5 }) {
       {/* Points */}
       {data.map((d, i) => (
         <circle key={i} cx={px(i)} cy={py(d.val)} r={i === data.length - 1 ? 4.5 : 3}
-          fill={d.val >= lo && d.val <= hi ? '#0f7852' : '#c62436'}
+          style={{ fill: d.val >= lo && d.val <= hi ? 'var(--ok)' : 'var(--bad)' }}
           stroke="#fff" strokeWidth={1.5} />
       ))}
 
-      {/* X labels */}
+      {/* X labels — were #8ea1a9 (2.69:1) and #bccad0 (1.68:1) on white, i.e.
+          effectively invisible. Both now use the text tokens, which pass AA. */}
       {data.map((d, i) => (
         <text key={i} x={px(i)} y={H - 2} textAnchor="middle"
-          style={{ fontSize: 9, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#8ea1a9', fontWeight: 500, letterSpacing: '0.02em' }}>
+          style={{ fontSize: 9, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: 'var(--muted)', fontWeight: 500, letterSpacing: '0.02em' }}>
           {d.label}
         </text>
       ))}
@@ -219,16 +378,16 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5 }) {
       {/* Y labels */}
       {ticks.map((v, i) => (
         <text key={i} x={pad.l - 4} y={py(v) + 3} textAnchor="end"
-          style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#bccad0' }}>
+          style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: 'var(--faint)' }}>
           {v.toFixed(1)}
         </text>
       ))}
 
-      {/* Target label */}
-      <text x={pad.l + cW} y={Math.min(loY, hiY) - 4} textAnchor="end"
-        style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: '#087299', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-        target
-      </text>
+      {/* No in-chart "target" caption: it was anchored to the right edge of the
+          band, which is exactly where the latest reading is plotted, so with a
+          full six-test history the word sat underneath the last point. The card
+          header already states "Target lo–hi" and the band is drawn, so the
+          caption was duplicating information as well as colliding. */}
     </svg>
   );
 }
@@ -238,33 +397,66 @@ function TodoCard({ t, idx, onToggle, onDelete }) {
   const [swipeX, setSwipeX] = React.useState(0);
   const [swiping, setSwiping] = React.useState(false);
   const touchStart = React.useRef(null);
+  const axis = React.useRef(null); // 'x' | 'y' — locked on first decisive move
   const THRESHOLD = 60;
 
-  const onTouchStart = (e) => { touchStart.current = e.touches[0].clientX; setSwiping(false); };
+  // The swipe used to react to any horizontal delta, so cards slid sideways
+  // during ordinary vertical scrolling. Lock to an axis on the first move that
+  // is clearly one or the other, and ignore the gesture entirely once it's
+  // vertical. Swiping back to the right now also closes an open card.
+  const onTouchStart = (e) => {
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, from: swipeX };
+    axis.current = null;
+    setSwiping(false);
+  };
   const onTouchMove = (e) => {
-    if (touchStart.current === null) return;
-    const dx = e.touches[0].clientX - touchStart.current;
-    if (dx < -10) { setSwiping(true); setSwipeX(Math.max(-80, dx)); }
+    if (!touchStart.current) return;
+    const dx = e.touches[0].clientX - touchStart.current.x;
+    const dy = e.touches[0].clientY - touchStart.current.y;
+    if (!axis.current) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      axis.current = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    }
+    if (axis.current !== 'x') return;
+    setSwiping(true);
+    setSwipeX(Math.min(0, Math.max(-80, touchStart.current.from + dx)));
   };
   const onTouchEnd = () => {
-    if (swipeX < -THRESHOLD) { setSwipeX(-80); }
-    else { setSwipeX(0); setSwiping(false); }
+    if (axis.current === 'x') setSwipeX(swipeX < -THRESHOLD ? -80 : 0);
+    setSwiping(false);
     touchStart.current = null;
+    axis.current = null;
   };
+  const open = swipeX < -10;
+  const checkLabel = (t.done ? 'Done: ' : 'Mark done: ') + t.label;
 
   return (
     <div className="todo-wrap" style={{ marginBottom: 0 }}>
-      {!t.isRoutine && <div className="todo-delete-bg" onClick={() => onDelete(t.id)}>✕</div>}
+      {!t.isRoutine && (
+        <button type="button" className="todo-delete-bg" tabIndex={-1} aria-hidden="true"
+          onClick={() => onDelete(t.id)}>✕</button>
+      )}
+      {/* The card keeps its tap-anywhere behaviour for touch, but the actionable
+          controls are now real buttons: the whole card used to be a bare onClick
+          div, so ticking an action off was impossible without a mouse or a
+          touchscreen and the list was invisible to the accessibility tree. */}
       <div className={`todo-card fade-up${t.done ? ' done' : ''}`}
         style={{ animationDelay: `${idx * 0.05}s`, transform: `translateX(${swipeX}px)`, transition: swiping ? 'none' : 'transform 0.25s ease' }}
-        onClick={() => { if (swipeX < -10) { setSwipeX(0); return; } onToggle(t.id); }}
+        onClick={(e) => {
+          if (open) { setSwipeX(0); return; }
+          // Ignore clicks that a nested button already handled.
+          if (e.target.closest && e.target.closest('button')) return;
+          onToggle(t.id);
+        }}
         onTouchStart={t.isRoutine ? undefined : onTouchStart}
         onTouchMove={t.isRoutine ? undefined : onTouchMove}
         onTouchEnd={t.isRoutine ? undefined : onTouchEnd}>
         <div className="todo-accent" style={{ background: t.color }} />
-        <div style={{ marginLeft: 2 }}>
-          <div className={`todo-check${t.done ? ' checked' : ''}`}>{t.done ? '✓' : ''}</div>
-        </div>
+        <button type="button" className={`todo-check${t.done ? ' checked' : ''}`}
+          role="checkbox" aria-checked={!!t.done} aria-label={checkLabel}
+          onClick={(e) => { e.stopPropagation(); if (open) { setSwipeX(0); return; } onToggle(t.id); }}>
+          <span aria-hidden="true">{t.done ? '✓' : ''}</span>
+        </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
             <div style={{ fontFamily: 'Geist Mono, ui-monospace, monospace', color: t.color, fontSize: 10, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{t.pri}</div>
@@ -272,9 +464,11 @@ function TodoCard({ t, idx, onToggle, onDelete }) {
           <div className="t-title" style={{ fontSize: 14.5, color: 'var(--ink)', lineHeight: 1.35 }}>{t.label}</div>
           <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4, lineHeight: 1.45 }}>{t.reason}</div>
         </div>
-        <button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-          aria-label="Delete action"
-          style={{ position: 'absolute', top: 4, right: 4, width: 32, height: 32, border: 'none', background: 'transparent', color: 'var(--faint)', fontSize: 15, cursor: 'pointer', borderRadius: 8, display: t.isRoutine ? 'none' : 'block' }}>×</button>
+        {!t.isRoutine && (
+          <button type="button" className="todo-del-btn"
+            onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+            aria-label={'Delete action: ' + t.label}>×</button>
+        )}
       </div>
     </div>
   );
@@ -284,8 +478,14 @@ function TodoCard({ t, idx, onToggle, onDelete }) {
 function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload, uploading, phHistory, routines, logEntries, onRoutineDone }) {
   testData = testData || TEST;
   const hasTest = !!testData.date;
-  const ph = testData.metrics[0];
-  const badCount = testData.metrics.filter(m => m.status !== 'ok').length;
+  // Looked up by id, not by array position. Persisted or imported test data can
+  // carry a metrics array of a different length or order, and metrics[0]/[1]/[3]
+  // then reads the wrong metric or throws on undefined.
+  const metric = (id) => (testData.metrics || []).find(m => m.id === id) ||
+    METRIC_DEFS.find(m => m.id === id) || { val: null, status: 'ok', lo: 0, hi: 0, label: id };
+  const ph = metric('ph');
+  const badCount = (testData.metrics || []).filter(m => m.status !== 'ok').length;
+  const shortVal = (m) => (m.val == null ? '—' : (m.status === 'ok' ? 'OK' : m.val));
 
   // Compute routine todos (overdue + due) and upcoming list
   const RAPI = window.RoutinesAPI;
@@ -322,7 +522,7 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div className="t-label" style={{ color: 'rgba(234,246,251,0.5)', marginBottom: 8 }}>{hasTest ? 'Last tested · ' + testData.date : 'No test data yet'}</div>
+              <div className="t-label" style={{ color: 'var(--hero-dim)', marginBottom: 8 }}>{hasTest ? 'Last tested · ' + testData.date : 'No test data yet'}</div>
               <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 26, lineHeight: 1.15 }}>
                 {hasTest ? (openCount === 0 ? 'All caught up.' : (openCount === 1 ? '1 thing needs attention.' : openCount + ' things need attention.')) : 'Upload a report to get started.'}
               </div>
@@ -336,60 +536,69 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
             )}
           </div>
           {hasTest && (
-            <div style={{ display: 'flex', gap: 18, color: 'rgba(234,246,251,0.55)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>
-              {testData.lsi != null && <span><span style={{ color: 'rgba(234,246,251,0.4)' }}>LSI </span>{testData.lsi}</span>}
-              <span><span style={{ color: 'rgba(234,246,251,0.4)' }}>Salt </span>{testData.metrics[3].status === 'ok' ? 'OK' : testData.metrics[3].val}</span>
-              <span><span style={{ color: 'rgba(234,246,251,0.4)' }}>Chlorine </span>{testData.metrics[1].status === 'ok' ? 'OK' : testData.metrics[1].val}</span>
+            <div style={{ display: 'flex', gap: 18, color: 'var(--hero-dim)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>
+              {testData.lsi != null && <span><span style={{ color: 'var(--hero-dim-2)' }}>LSI </span>{testData.lsi}</span>}
+              <span><span style={{ color: 'var(--hero-dim-2)' }}>Salt </span>{shortVal(metric('salt'))}</span>
+              <span><span style={{ color: 'var(--hero-dim-2)' }}>Chlorine </span>{shortVal(metric('fcl'))}</span>
             </div>
           )}
 
           {/* Upload zone — full size only before the first test is loaded */}
           {!hasTest &&
-          <div className="upload-zone" style={{ marginTop: 18, opacity: uploading ? 0.6 : 1 }}
-            onClick={onUpload}>
+          <button type="button" className="upload-zone" style={{ marginTop: 18, opacity: uploading ? 0.6 : 1 }}
+            disabled={uploading} onClick={onUpload}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="15" height="17" viewBox="0 0 15 17" fill="none"><path d="M2 1h7l4 4v10a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="rgba(234,246,251,0.7)" strokeWidth="1.2"/><path d="M9 1v4h4" stroke="rgba(234,246,251,0.7)" strokeWidth="1.2"/></svg>
+              <svg width="15" height="17" viewBox="0 0 15 17" fill="none" aria-hidden="true"><path d="M2 1h7l4 4v10a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="rgba(234,246,251,0.7)" strokeWidth="1.2"/><path d="M9 1v4h4" stroke="rgba(234,246,251,0.7)" strokeWidth="1.2"/></svg>
             </div>
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, textAlign: 'left' }}>
               <div style={{ color: 'var(--hero-fg)', fontFamily: 'Geist', fontWeight: 500, fontSize: 13.5, letterSpacing: '-0.005em' }}>{uploading ? 'Parsing PDF…' : 'Upload Poolwerx Report'}</div>
-              <div style={{ color: 'rgba(234,246,251,0.5)', fontSize: 11.5, marginTop: 2 }}>{uploading ? 'Please wait' : 'Tap to import latest test results'}</div>
+              <div style={{ color: 'var(--hero-dim)', fontSize: 11.5, marginTop: 2 }}>{uploading ? 'Please wait' : 'Tap to import latest test results'}</div>
             </div>
-            <div style={{ marginLeft: 'auto', color: 'rgba(234,246,251,0.4)', fontSize: 18, lineHeight: 1 }}>→</div>
-          </div>
+            <div aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--hero-dim-2)', fontSize: 18, lineHeight: 1 }}>→</div>
+          </button>
           }
         </div>
       </div>
 
-      {/* Pills */}
+      {/* Pills — real buttons, and the status is in the accessible name. The
+          coloured ::before dot is 6px and is the only visual carrier of
+          pass/warn/fail, which is invisible to a screen reader and marginal for
+          anyone who can't separate the hues. */}
       <div className="pills-row">
         {hasTest ? [
-          { label: 'pH ' + testData.metrics[0].val, cls: pillCls(testData.metrics[0].status) },
-          { label: 'Cl ' + testData.metrics[1].val, cls: pillCls(testData.metrics[1].status) },
-          { label: 'Salt ' + (testData.metrics[3].status === 'ok' ? 'OK' : testData.metrics[3].val), cls: pillCls(testData.metrics[3].status) },
-          { label: badCount + ' issue' + (badCount !== 1 ? 's' : ''), cls: badCount > 0 ? 'pill-bad' : 'pill-ok' },
+          { label: 'pH ' + (metric('ph').val == null ? '—' : metric('ph').val), status: metric('ph').status, name: 'pH' },
+          { label: 'Cl ' + (metric('fcl').val == null ? '—' : metric('fcl').val), status: metric('fcl').status, name: 'Free chlorine' },
+          { label: 'Salt ' + shortVal(metric('salt')), status: metric('salt').status, name: 'Salt' },
+          { label: badCount + ' issue' + (badCount !== 1 ? 's' : ''), status: badCount > 0 ? 'bad' : 'ok',
+            aria: badCount === 0 ? 'No metrics outside target. View all metrics'
+              : badCount + ' metric' + (badCount !== 1 ? 's' : '') + ' outside target. View all metrics' },
         ].map((p, i) => (
-          <div key={i} className={`pill ${p.cls} t-num`} onClick={() => onNav('chemistry')}>{p.label}</div>
+          <button type="button" key={i} className={`pill ${pillCls(p.status)} t-num`}
+            aria-label={p.aria || (p.name + ' ' + p.label.split(' ').slice(1).join(' ') + ' — ' + STATUS_WORD[p.status] + '. View all metrics')}
+            onClick={() => onNav('chemistry')}>{p.label}</button>
         )) : <div style={{ color: 'var(--muted)', fontSize: 12, padding: '4px 4px' }}>Results will appear here after upload</div>}
       </div>
 
       {/* pH Trend */}
       <div className="sec-head">
         <span>pH Trend · 6 months</span>
-        {hasTest && <a onClick={() => onNav('chemistry')}>All metrics →</a>}
+        {hasTest && <button type="button" className="link-btn" onClick={() => onNav('chemistry')}>All metrics →</button>}
       </div>
       {hasTest ? (
       <div className="chart-card fade-up">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 14 }}>
           <div>
             <div className="t-label" style={{ marginBottom: 4 }}>Current pH</div>
-            <div className="t-display t-num" style={{ fontSize: 34, color: 'var(--ink)', lineHeight: 1 }}>{ph.val}</div>
+            <div className="t-display t-num" style={{ fontSize: 34, color: 'var(--ink)', lineHeight: 1 }}>{ph.val == null ? '—' : ph.val}</div>
           </div>
           <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
-            <span className={`badge ${ph.status === 'ok' ? 'badge-ok' : 'badge-bad'}`}>{ph.status === 'ok' ? 'In range' : 'Out of range'}</span>
+            {ph.val == null
+              ? <span className="badge badge-warn">Not in this report</span>
+              : <span className={`badge ${ph.status === 'ok' ? 'badge-ok' : ph.status === 'warn' ? 'badge-warn' : 'badge-bad'}`}>{ph.status === 'ok' ? 'In range' : ph.status === 'warn' ? 'Borderline' : 'Out of range'}</span>}
             <div style={{ color: 'var(--muted)', fontSize: 11.5 }}>Target <span className="t-num">{ph.lo}–{ph.hi}</span></div>
           </div>
         </div>
-        <TrendChart data={phHistory || []} lo={ph.lo} hi={ph.hi} />
+        <TrendChart data={phHistory || []} lo={ph.lo} hi={ph.hi} label="pH" />
       </div>
       ) : (
         <div className="chart-card" style={{ textAlign: 'center', padding: '32px 20px', color: 'var(--muted)' }}>
@@ -438,13 +647,18 @@ function Chemistry({ onNav, testData, onReupload }) {
   const pct = (v, mn, mx) => Math.max(0, Math.min(1, (v - mn) / (mx - mn)));
   const colors = { ok: 'var(--ok)', bad: 'var(--bad)', warn: 'var(--warn)' };
   const bgColors = { ok: 'var(--ok-tint)', bad: 'var(--bad-tint)', warn: 'var(--warn-tint)' };
+  // A metric with no value wasn't read from this report — it is neither in range
+  // nor out of it, and counting it either way misrepresents the test.
+  const shown = testData.metrics || [];
+  const offCount = shown.filter(m => m.val != null && m.status !== 'ok').length;
+  const missingCount = shown.filter(m => m.val == null).length;
 
   return (
     <div className="screen">
       <div className="hero">
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-            <div className="t-label" style={{ color: 'rgba(234,246,251,0.5)' }}>Water Chemistry</div>
+            <div className="t-label" style={{ color: 'var(--hero-dim)' }}>Water Chemistry</div>
             {hasTest && (
               <button onClick={onReupload} className="chip-btn" aria-label="Upload a new Poolwerx test PDF"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -453,11 +667,12 @@ function Chemistry({ onNav, testData, onReupload }) {
             )}
           </div>
           <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 22, lineHeight: 1.2 }}>{hasTest ? 'Test · ' + testData.date : 'Water Chemistry'}</div>
-          {hasTest && <div style={{ color: 'rgba(234,246,251,0.5)', fontSize: 12, marginTop: 4 }}>{testData.pool}</div>}
+          {hasTest && testData.pool && <div style={{ color: 'var(--hero-dim)', fontSize: 12, marginTop: 4 }}>{testData.pool}</div>}
           {hasTest && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '4px 11px', color: 'rgba(234,246,251,0.85)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>LSI {testData.lsi}</div>
-            <div style={{ background: 'rgba(198,36,54,0.22)', border: '1px solid rgba(198,36,54,0.45)', borderRadius: 999, padding: '4px 11px', color: '#ffc4c4', fontSize: 12, fontWeight: 400 }}>{testData.metrics.filter(m => m.status !== 'ok').length} out of range</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+            {testData.lsi != null && <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '4px 11px', color: 'rgba(234,246,251,0.85)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>LSI {testData.lsi}</div>}
+            {offCount > 0 && <div style={{ background: 'rgba(198,36,54,0.22)', border: '1px solid rgba(198,36,54,0.45)', borderRadius: 999, padding: '4px 11px', color: '#ffc4c4', fontSize: 12, fontWeight: 400 }}>{offCount} need{offCount === 1 ? 's' : ''} attention</div>}
+            {missingCount > 0 && <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '4px 11px', color: 'rgba(234,246,251,0.85)', fontSize: 12, fontWeight: 400 }}>{missingCount} not in this report</div>}
           </div>
           )}
         </div>
@@ -486,7 +701,9 @@ function Chemistry({ onNav, testData, onReupload }) {
                     {m.val != null ? m.val : '—'}<span style={{ fontSize: 13, fontWeight: 400, marginLeft: 4, color: 'var(--muted)' }}>{m.val != null ? m.unit : ''}</span>
                   </div>
                 </div>
-                <span className={`badge ${badgeCls}`}>{m.status === 'ok' ? 'In range' : m.status === 'warn' ? 'Borderline' : 'Out of range'}</span>
+                {m.val == null
+                  ? <span className="badge badge-warn">Not in this report</span>
+                  : <span className={`badge ${badgeCls}`}>{m.status === 'ok' ? 'In range' : m.status === 'warn' ? 'Borderline' : 'Out of range'}</span>}
               </div>
               <div className="range-track">
                 <div className="range-zone" style={{ left: `${loPct}%`, width: `${hiPct - loPct}%` }} />
@@ -514,10 +731,9 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
   const [unit, setUnit] = React.useState('mL');
   const [notes, setNotes] = React.useState('');
   const [saved, setSaved] = React.useState(false);
-  const [showChemPicker, setShowChemPicker] = React.useState(false);
-  const [showUnitPicker, setShowUnitPicker] = React.useState(false);
   const [logType, setLogType] = React.useState('chemical'); // chemical | backwash | aiper (pool cleaner) | watertest | note
   const [errMsg, setErrMsg] = React.useState('');
+  const errRef = React.useRef(null);
 
   const chemicals = ['Hydrochloric Acid', 'Non Chlorine Shock', 'Calcium Up', 'Sunblock', 'Algaecide', 'Clarifier', 'Chlorine', 'Other'];
   const units = ['mL', 'L', 'g', 'kg', 'tabs'];
@@ -532,14 +748,21 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
     catch(e) { return iso; }
   };
 
+  // Validation errors were rendered silently — no announcement and no focus
+  // move, so on a screen reader nothing happened when Save did nothing.
+  const failWith = (msg) => {
+    setErrMsg(msg);
+    setTimeout(() => errRef.current && errRef.current.focus(), 0);
+  };
+
   const handleSave = () => {
     setErrMsg('');
-    if (logType === 'chemical' && (!amount || parseFloat(amount) <= 0)) {
-      setErrMsg('Enter an amount greater than 0');
+    if (logType === 'chemical' && (!amount || !(parseFloat(amount) > 0))) {
+      failWith('Enter an amount greater than 0');
       return;
     }
     if (logType === 'note' && !notes.trim()) {
-      setErrMsg('Add a note before saving');
+      failWith('Add a note before saving');
       return;
     }
     setSaved(true);
@@ -573,83 +796,62 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
   ];
 
   return (
-    <div className="screen" onClick={() => { setShowChemPicker(false); setShowUnitPicker(false); }}>
+    <div className="screen">
       <div className="hero">
         <div style={{ position: 'relative', zIndex: 1 }}>
-          <div className="t-label" style={{ color: 'rgba(234,246,251,0.5)', marginBottom: 8 }}>Log Activity</div>
-          <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15 }}>What happened?</div>
-          <div style={{ color: 'rgba(234,246,251,0.5)', fontSize: 12.5, marginTop: 6 }}>Record doses, maintenance &amp; notes</div>
+          <div className="t-label" style={{ color: 'var(--hero-dim)', marginBottom: 8 }}>Log Activity</div>
+          <h1 className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15, fontWeight: 600 }}>What happened?</h1>
+          <div style={{ color: 'var(--hero-dim)', fontSize: 12.5, marginTop: 6 }}>Record doses, maintenance &amp; notes</div>
         </div>
       </div>
 
-      {/* Type selector */}
-      <div className="sec-head" style={{ marginTop: 4 }}><span>What are you logging?</span></div>
-      <div className="quick-row">
+      {/* Type selector — real buttons in a radiogroup. These were bare onClick
+          divs: not focusable, not announced, and with no selected state exposed. */}
+      <div className="sec-head" style={{ marginTop: 4 }}><span id="log-type-label">What are you logging?</span></div>
+      <div className="quick-row" role="radiogroup" aria-labelledby="log-type-label">
         {typeButtons.map(b => (
-          <div key={b.id} className="quick-btn"
+          <button type="button" key={b.id} className="quick-btn"
+            role="radio" aria-checked={logType === b.id}
             style={{ background: logType === b.id ? 'var(--ink)' : 'var(--surface)', borderColor: logType === b.id ? 'var(--ink)' : 'var(--hairline)', color: logType === b.id ? '#fff' : 'var(--ink-2)' }}
-            onClick={e => { e.stopPropagation(); setLogType(b.id); }}>
-            <div className="icon" style={{ opacity: logType === b.id ? 1 : 0.85, display: 'flex' }}><Icon name={KIND_ICON[b.id]} size={17} /></div>
+            onClick={() => setLogType(b.id)}>
+            <span className="icon" aria-hidden="true" style={{ opacity: logType === b.id ? 1 : 0.85, display: 'flex' }}><Icon name={KIND_ICON[b.id]} size={17} /></span>
             {b.label}
-          </div>
+          </button>
         ))}
       </div>
 
-      {/* Chemical form */}
+      {/* Chemical form — the chemical and unit pickers are native <select>s now.
+          The hand-rolled dropdowns they replace had no roles, no aria-expanded,
+          no focus management and no Escape, closed only via a click handler on
+          the scroll container, and were worse than the OS picker on a phone.
+          RoutineEditor already used a native select for the same list. */}
       {logType === 'chemical' && (
       <div className="log-form">
-        {/* Chemical picker */}
-        <div style={{ position: 'relative' }}>
-          <div className="form-field" onClick={e => { e.stopPropagation(); setShowChemPicker(v => !v); setShowUnitPicker(false); }} style={{ cursor: 'pointer' }}>
-            <div className="form-label">Chemical</div>
-            <div className="form-select">
-              <div className="form-val">{chemical}</div>
-              <div className="chevron">{showChemPicker ? '▴' : '▾'}</div>
-            </div>
-          </div>
-          {showChemPicker && (
-            <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: '0 12px 32px rgba(12,12,13,0.10)', zIndex: 100, overflow: 'hidden' }}>
-              {chemicals.map(c => (
-                <div key={c} style={{ padding: '12px 14px', borderBottom: '1px solid var(--hairline-2)', cursor: 'pointer', fontFamily: 'Geist', fontSize: 14, fontWeight: c === chemical ? 500 : 400, color: c === chemical ? 'var(--accent)' : 'var(--ink)', background: c === chemical ? 'var(--accent-tint)' : 'transparent', letterSpacing: '-0.005em' }}
-                  onClick={() => { setChemical(c); setShowChemPicker(false); }}>
-                  {c}
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="form-field">
+          <label className="form-label" htmlFor="log-chemical">Chemical</label>
+          <select id="log-chemical" className="form-native-select" value={chemical} onChange={e => setChemical(e.target.value)}>
+            {chemicals.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
 
         {/* Amount + Unit */}
         <div style={{ display: 'flex', gap: 10 }}>
           <div className="form-field" style={{ flex: 2 }}>
-            <div className="form-label">Amount</div>
-            <input value={amount} onChange={e => setAmount(e.target.value)} type="number" inputMode="decimal" placeholder="0"
+            <label className="form-label" htmlFor="log-amount">Amount</label>
+            <input id="log-amount" value={amount} onChange={e => setAmount(e.target.value)} type="number" inputMode="decimal" min="0" step="any" placeholder="0"
               style={{ fontFamily: 'Geist', fontSize: 16, fontWeight: 600, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <div className="form-field" onClick={e => { e.stopPropagation(); setShowUnitPicker(v => !v); setShowChemPicker(false); }} style={{ cursor: 'pointer' }}>
-              <div className="form-label">Unit</div>
-              <div className="form-select">
-                <div className="form-val">{unit}</div>
-                <div className="chevron">{showUnitPicker ? '▴' : '▾'}</div>
-              </div>
-            </div>
-            {showUnitPicker && (
-              <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: '0 12px 32px rgba(12,12,13,0.10)', zIndex: 100, overflow: 'hidden' }}>
-                {units.map(u => (
-                  <div key={u} style={{ padding: '11px 14px', borderBottom: '1px solid var(--hairline-2)', cursor: 'pointer', fontFamily: 'Geist', fontSize: 14, fontWeight: u === unit ? 500 : 400, color: u === unit ? 'var(--accent)' : 'var(--ink)', background: u === unit ? 'var(--accent-tint)' : 'transparent', letterSpacing: '-0.005em' }}
-                    onClick={() => { setUnit(u); setShowUnitPicker(false); }}>
-                    {u}
-                  </div>
-                ))}
-              </div>
-            )}
+          <div className="form-field" style={{ flex: 1 }}>
+            <label className="form-label" htmlFor="log-unit">Unit</label>
+            <select id="log-unit" className="form-native-select" value={unit} onChange={e => setUnit(e.target.value)}>
+              {units.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
           </div>
         </div>
 
         <div className="form-field">
-          <div className="form-label">Date &amp; Time</div>
-          <input type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
+          <label className="form-label" htmlFor="log-datetime">Date &amp; Time</label>
+          <input id="log-datetime" type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
             style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
         </div>
       </div>
@@ -659,13 +861,13 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
       {(logType === 'backwash' || logType === 'aiper' || logType === 'watertest') && (
         <div className="log-form">
           <div className="form-field">
-            <div className="form-label">Date &amp; Time</div>
-            <input type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
+            <label className="form-label" htmlFor="log-datetime-2">Date &amp; Time</label>
+            <input id="log-datetime-2" type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
               style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
           <div className="form-field">
-            <div className="form-label">Notes (optional)</div>
-            <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. filter clean, good flow"
+            <label className="form-label" htmlFor="log-notes">Notes (optional)</label>
+            <input id="log-notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. filter clean, good flow"
               style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
         </div>
@@ -675,13 +877,13 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
       {logType === 'note' && (
         <div className="log-form">
           <div className="form-field">
-            <div className="form-label">Note</div>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="What did you observe?"
+            <label className="form-label" htmlFor="log-note-body">Note</label>
+            <textarea id="log-note-body" value={notes} onChange={e => setNotes(e.target.value)} placeholder="What did you observe?"
               rows={3} style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%', resize: 'none', lineHeight: 1.5 }} />
           </div>
           <div className="form-field">
-            <div className="form-label">Date &amp; Time</div>
-            <input type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
+            <label className="form-label" htmlFor="log-datetime-3">Date &amp; Time</label>
+            <input id="log-datetime-3" type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
               style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
         </div>
@@ -689,11 +891,12 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
 
       <div style={{ padding: '8px 14px 0' }}>
         {errMsg && (
-          <div style={{ background: 'var(--bad-tint)', color: 'var(--bad)', padding: '10px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 500, marginBottom: 10, border: '1px solid #f4cdd2' }}>
+          <div ref={errRef} tabIndex={-1} role="alert"
+            style={{ background: 'var(--bad-tint)', color: 'var(--bad)', padding: '10px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 500, marginBottom: 10, border: '1px solid #f4cdd2' }}>
             {errMsg}
           </div>
         )}
-        <button className="btn-primary" style={{ marginBottom: 16 }} onClick={handleSave}>
+        <button type="button" className="btn-primary" style={{ marginBottom: 16 }} onClick={handleSave}>
           {saved ? '✓ Saved' : 'Save log entry'}
         </button>
       </div>
@@ -708,15 +911,17 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
                 From test · {testData.date}
               </div>
               {pending.map((t, i) => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: i < pending.length - 1 ? '1px solid var(--hairline-2)' : 'none', cursor: 'pointer' }}
+                <button type="button" key={t.id} className="dose-row"
+                  aria-label={'Mark done: ' + t.label}
+                  style={{ borderBottom: i < pending.length - 1 ? '1px solid var(--hairline-2)' : 'none' }}
                   onClick={() => onToggle(t.id)}>
-                  <div className="todo-check" style={{ minWidth: 22 }}></div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontFamily: 'Geist', fontSize: 13, fontWeight: 500, color: 'var(--ink)', letterSpacing: '-0.005em' }}>{t.label}</div>
-                    <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 2 }}>{t.reason}</div>
-                  </div>
-                  <div style={{ fontFamily: 'Geist Mono, ui-monospace, monospace', color: t.color, fontSize: 10, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{t.pri}</div>
-                </div>
+                  <span className="todo-check" aria-hidden="true" style={{ minWidth: 22 }}></span>
+                  <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <span style={{ display: 'block', fontFamily: 'Geist', fontSize: 13, fontWeight: 500, color: 'var(--ink)', letterSpacing: '-0.005em' }}>{t.label}</span>
+                    <span style={{ display: 'block', color: 'var(--muted)', fontSize: 11.5, marginTop: 2 }}>{t.reason}</span>
+                  </span>
+                  <span style={{ fontFamily: 'Geist Mono, ui-monospace, monospace', color: t.color, fontSize: 10, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{t.pri}</span>
+                </button>
               ))}
             </div>
           </div>
@@ -743,13 +948,16 @@ function History({ onNav, entries: userEntries, onExport, onImport }) {
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div className="t-label" style={{ color: 'rgba(234,246,251,0.5)', marginBottom: 8 }}>History</div>
-              <div className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15 }}>Activity log</div>
-              <div style={{ color: 'rgba(234,246,251,0.5)', fontSize: 12.5, marginTop: 6 }}>Doses, runs, observations</div>
+              <div className="t-label" style={{ color: 'var(--hero-dim)', marginBottom: 8 }}>History</div>
+              <h1 className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15, fontWeight: 600 }}>Activity log</h1>
+              <div style={{ color: 'var(--hero-dim)', fontSize: 12.5, marginTop: 6 }}>Doses, runs, observations</div>
             </div>
-            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-              <button onClick={onExport} className="chip-btn">↓ Export</button>
-              <button onClick={() => fileRef.current && fileRef.current.click()} className="chip-btn">↑ Import</button>
+            {/* Import replaces everything, so it says so — it used to sit 6px from
+                Export as an identical 26px chip. */}
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              <button type="button" onClick={onExport} className="chip-btn" aria-label="Export a backup of all data">↓ Export</button>
+              <button type="button" onClick={() => fileRef.current && fileRef.current.click()} className="chip-btn"
+                aria-label="Import a backup — this replaces all current data">↑ Import</button>
             </div>
           </div>
         </div>
@@ -993,7 +1201,13 @@ function App() {
   // Reminders: re-arm on load if previously enabled, and re-check whenever the
   // app regains focus (catches routines that came due while it was backgrounded).
   React.useEffect(() => {
-    if (window.PoolNotify) window.PoolNotify.resume();
+    if (window.PoolNotify) {
+      // Registers the service worker on every load — it backs the offline cache
+      // now, not just reminders. resume() then re-arms notifications only if
+      // they were previously enabled.
+      window.PoolNotify.ensureRegistered();
+      window.PoolNotify.resume();
+    }
     const onVis = () => {
       if (document.visibilityState === 'visible' && window.PoolNotify) window.PoolNotify.checkNow();
     };
@@ -1135,19 +1349,55 @@ function App() {
     showToast('Reading PDF…');
     try {
       const parsed = await parsePoolwerxPDF(file);
+
+      // Nothing recognisable in the file — bail before touching state. Replacing
+      // a good test and a live action list with an empty one because the user
+      // picked the wrong PDF is not a recoverable mistake.
+      if (parsed.metricsParsed === 0 && (!parsed.recs || parsed.recs.length === 0)) {
+        showToast("Couldn't read that PDF — no results found");
+        setUploading(false);
+        e.target.value = '';
+        return;
+      }
+
+      // Guard against an older report silently overwriting newer results.
+      const newTs = parseTestDate(parsed.date);
+      const curTs = testData.date ? parseTestDate(testData.date) : null;
+      if (newTs && curTs && newTs < curTs &&
+          !window.confirm('That report is dated ' + parsed.date + ', which is older than your current test (' + testData.date + ').\n\nLoad it anyway and replace the newer results?')) {
+        setUploading(false);
+        e.target.value = '';
+        return;
+      }
+
       const vals = { ph: parsed.ph, fcl: parsed.freeCl, ccl: parsed.combCl, salt: parsed.salt, alk: parsed.alk, cah: parsed.caHard, cya: parsed.cya, phos: parsed.phos };
-      const updatedMetrics = testData.metrics.map(m => {
-        const v = vals[m.id];
-        if (v === null || v === undefined) return m;
-        return { ...m, val: v, status: calcStatus(v, m.lo, m.hi) };
+      // Rebuilt from METRIC_DEFS rather than mapped over the persisted metrics.
+      // Two reasons: (1) a metric that fails to parse must go to null, not keep
+      // last month's reading under this month's date — the old code returned the
+      // previous metric object verbatim, so stale numbers were presented as new
+      // results and the fallback below even built to-dos from them; (2) the
+      // target ranges used to be frozen into localStorage on first save, so any
+      // later correction to a range never reached an existing install.
+      const updatedMetrics = METRIC_DEFS.map(def => {
+        const v = vals[def.id];
+        return v == null
+          ? { ...def, val: null, status: 'ok' }
+          : { ...def, val: v, status: calcStatus(v, def.lo, def.hi, def.min, def.max) };
       });
       const updated = { ...testData, date: parsed.date, pool: parsed.pool || testData.pool, lsi: parsed.lsi != null ? parsed.lsi : testData.lsi, metrics: updatedMetrics };
       setTestData(updated);
       // An imported report IS a water test — log it (once per test date) so the
-      // "Get water tested" routine resets from the report's own date.
-      const testTs = parseTestDate(parsed.date) || Date.now();
-      setLogEntries(prev => prev.some(e => e.kind === 'watertest' && e.ts === testTs)
-        ? prev : insertEntrySorted(prev, waterTestEntry(testTs)));
+      // "Get water tested" routine resets from the report's own date. Deduped on
+      // the calendar day, not the exact ts: an unparseable date falls back to
+      // Date.now(), which never equals a stored ts and so logged a duplicate
+      // water test on every upload.
+      const testTs = newTs || Date.now();
+      const testDay = new Date(testTs); testDay.setHours(0, 0, 0, 0);
+      setLogEntries(prev => prev.some(en => {
+        if (en.kind !== 'watertest' || !en.ts) return false;
+        const d = new Date(en.ts); d.setHours(0, 0, 0, 0);
+        return d.getTime() === testDay.getTime();
+      }) ? prev : insertEntrySorted(prev, waterTestEntry(testTs)));
       if (parsed.ph != null) {
         const dateLabel = (parsed.date || '').split(' ').slice(0, 2).join(' ') || 'now';
         setPhHistory(prev => {
@@ -1160,18 +1410,24 @@ function App() {
       let newTodos = [];
       if (parsed.recs && parsed.recs.length > 0) {
         newTodos = parsed.recs.map((r, i) => {
-          // Match rec to a metric to get priority colour
-          const metric = updatedMetrics.find(m => m.status !== 'ok' && (
-            r.param.toLowerCase().includes(m.label.toLowerCase().split(' ')[0]) ||
-            r.action.toLowerCase().includes(m.label.toLowerCase().split(' ')[0])
-          ));
-          const status = metric ? metric.status : 'bad';
+          // Attribute the action to the metric its own heading names. The old
+          // first-word substring test matched "ph" inside "PHOSPHATES", so a
+          // phosphate dose was captioned "pH is 7.6" and dropped to MED while
+          // Phosphates sat at 2.608 against a 0–0.2 target. The text search is
+          // kept only as a fallback for an unrecognised heading, and now needs
+          // the whole label rather than its first word.
+          const mapped = metricIdForParam(r.param);
+          const metric = (mapped && updatedMetrics.find(m => m.id === mapped)) ||
+            updatedMetrics.find(m => m.status !== 'ok' && r.action.toLowerCase().includes(m.label.toLowerCase()));
+          const status = metric && metric.status !== 'ok' ? metric.status : 'bad';
           return {
             id: i + 1,
             pri: status === 'bad' ? 'HIGH' : 'MED',
             label: normalizeDose(r.action),
-            reason: metric ? (metric.label + ' is ' + metric.val + ' · target ' + metric.lo + '–' + metric.hi + ' ' + metric.unit) : r.param,
-          color: status === 'bad' ? '#c62436' : '#a15c00',
+            reason: (metric && metric.val != null)
+              ? (metric.label + ' is ' + metric.val + ' · target ' + metric.lo + '–' + metric.hi + (metric.unit ? ' ' + metric.unit : ''))
+              : (r.param || 'From your latest report'),
+            color: status === 'bad' ? 'var(--bad)' : 'var(--warn)',
             done: false,
           };
         });
@@ -1181,18 +1437,29 @@ function App() {
           id: i + 1, pri: m.status === 'bad' ? 'HIGH' : 'MED',
           label: m.label + ' out of range',
           reason: m.label + ' is ' + m.val + ' · target ' + m.lo + '–' + m.hi + ' ' + m.unit,
-          color: m.status === 'bad' ? '#c62436' : '#a15c00', done: false,
+          color: m.status === 'bad' ? 'var(--bad)' : 'var(--warn)', done: false,
         }));
       }
       setTodos(newTodos);
-      console.log('Recs parsed:', parsed.recs);
-      console.log('Todos built:', newTodos);
       if (window.PoolNotify && newTodos.length) {
         window.PoolNotify.notifyTodos(newTodos.length, newTodos[0] && newTodos[0].label, parsed.date);
       }
-      showToast('✓ Loaded test from ' + parsed.date);
+      // Say what actually came through. A blanket success toast hid partial
+      // parses completely: the hero showed the new date, Chemistry showed
+      // numbers, and nothing told the user some of them hadn't been read.
+      const dateLabel = parsed.date === 'Unknown date' ? 'that report' : parsed.date;
+      if (parsed.metricsParsed < parsed.metricsTotal) {
+        showToast('Loaded ' + parsed.metricsParsed + ' of ' + parsed.metricsTotal + ' results from ' + dateLabel + ' — check Chemistry');
+      } else {
+        showToast('✓ Loaded test from ' + dateLabel);
+      }
     } catch (err) {
-      showToast('Could not parse PDF — try another file');
+      // Distinguish "the CDN never arrived" from "this PDF isn't a Poolwerx
+      // report" — the old message blamed the file for a network failure.
+      const msg = err && /pdfjs-(timeout|unreachable)/.test(err.message || '')
+        ? 'Could not load the PDF reader — check your connection and try again'
+        : 'Could not parse PDF — try another file';
+      showToast(msg);
       console.error(err);
     }
     setUploading(false);
@@ -1277,25 +1544,30 @@ function App() {
           onDelete={(id) => { onDeleteRoutine(id); setEditorRule(null); }}
           onCancel={() => setEditorRule(null)} />
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', background: 'var(--bg)' }}>
-        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+      {/* app-shell carries the height: 100vh became 100dvh in CSS so the sticky
+          nav isn't pushed under the mobile browser's collapsing URL bar. */}
+      <div className="app-shell">
+        <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           {screens[screen]}
-        </div>
-        <nav className="bottom-nav">
+        </main>
+        <nav className="bottom-nav" aria-label="Main">
           {navItems.map(n => (
             <button key={n.id} type="button"
               className={`nav-item${screen === n.id ? ' active' : ''}`}
               aria-current={screen === n.id ? 'page' : undefined}
               onClick={() => setScreen(n.id)}>
-              <div className="nav-icon"><Icon name={n.icon} size={19} strokeWidth={screen === n.id ? 1.8 : 1.5} /></div>
+              <span className="nav-icon" aria-hidden="true"><Icon name={n.icon} size={19} strokeWidth={screen === n.id ? 1.8 : 1.5} /></span>
               {n.label}
             </button>
           ))}
         </nav>
+        {/* The live region stays mounted and empty so swapping its text is what
+            gets announced. The Undo button is only rendered (and focusable) while
+            a toast is actually showing. */}
         <div className={`toast${toast ? ' show' : ''}`} role="status" aria-live="polite">
           {toast && toast.msg}
           {toast && toast.actionLabel && (
-            <button className="toast-action" onClick={toast.onAction}>{toast.actionLabel}</button>
+            <button type="button" className="toast-action" onClick={toast.onAction}>{toast.actionLabel}</button>
           )}
         </div>
       </div>
