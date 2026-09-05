@@ -115,8 +115,36 @@ function lastMatchTs(rule, entries) {
   return null;
 }
 
-// Compute next-due timestamp (day-precision) given last-done ts
-function nextDueTs(rule, lastTs, nowMs) {
+// Next / previous scheduled weekday at day precision. `inclusive` keeps `fromTs`
+// itself when that day is one of `days`; otherwise search starts the day after.
+function nextMatchingDay(fromTs, days, inclusive) {
+  let cursor = dayStart(fromTs);
+  if (!inclusive) cursor += DAY_MS;
+  for (let i = 0; i < 21; i++) {
+    if (days.includes(new Date(cursor).getDay())) return cursor;
+    cursor += DAY_MS;
+  }
+  return null;
+}
+
+function prevMatchingDay(fromTs, days) {
+  let cursor = dayStart(fromTs) - DAY_MS;
+  for (let i = 0; i < 21; i++) {
+    if (days.includes(new Date(cursor).getDay())) return cursor;
+    cursor -= DAY_MS;
+  }
+  return null;
+}
+
+// Compute next-due timestamp (day-precision) given last-done ts.
+//
+// `fromLog` is set when lastTs is a real matching log entry (not createdTs).
+// Day-of-week rules used to search from the day AFTER lastDone, so adding acid
+// on Friday still left Saturday due — and the weekly reminder fired even though
+// the job was already done. A log off the scheduled weekday now counts against
+// the nearest occurrence: early (Fri → Sat) skips this Saturday; late (Sun →
+// last Sat) still comes due next Saturday.
+function nextDueTs(rule, lastTs, nowMs, fromLog) {
   const today = dayStart(nowMs);
   if (!rule || !rule.schedule) return today;
 
@@ -129,14 +157,27 @@ function nextDueTs(rule, lastTs, nowMs) {
   if (rule.schedule.type === 'dow') {
     const days = rule.schedule.days || [];
     if (days.length === 0) return today;
-    // Start searching from day after lastDone, or from 6 days ago if never logged.
-    let cursor = lastTs ? dayStart(lastTs) + DAY_MS : today - 6 * DAY_MS;
-    for (let i = 0; i < 21; i++) {
-      const dow = new Date(cursor).getDay();
-      if (days.includes(dow)) return cursor;
-      cursor += DAY_MS;
+
+    if (!lastTs) {
+      return nextMatchingDay(today - 6 * DAY_MS, days, true) || today;
     }
-    return today;
+
+    const lastDay = dayStart(lastTs);
+    const onSchedule = days.includes(new Date(lastDay).getDay());
+    // createdTs anchoring, and completing *on* a scheduled day, keep the old
+    // "next matching day after lastDay" behaviour.
+    if (!fromLog || onSchedule) {
+      return nextMatchingDay(lastDay, days, false) || today;
+    }
+
+    const prev = prevMatchingDay(lastDay, days);
+    const next = nextMatchingDay(lastDay, days, false);
+    const distPrev = prev != null ? dayDiff(lastDay, prev) : Infinity;
+    const distNext = next != null ? dayDiff(next, lastDay) : Infinity;
+    if (next != null && distNext < distPrev) {
+      return nextMatchingDay(next, days, false) || today;
+    }
+    return next || today;
   }
 
   return today;
@@ -146,8 +187,9 @@ function ruleStatus(rule, entries, nowMs) {
   const lastTs = lastMatchTs(rule, entries);
   // Never-logged rules anchor to their creation date so they start "upcoming",
   // not instantly overdue on first run.
-  const anchor = lastTs != null ? lastTs : (rule.createdTs || null);
-  const dueTs  = nextDueTs(rule, anchor, nowMs);
+  const fromLog = lastTs != null;
+  const anchor = fromLog ? lastTs : (rule.createdTs || null);
+  const dueTs  = nextDueTs(rule, anchor, nowMs, fromLog);
   const diff   = dayDiff(nowMs, dueTs); // positive = overdue, 0 = due today, negative = upcoming
   let status;
   if (diff > 0) status = 'overdue';
@@ -533,7 +575,7 @@ function UpcomingChips({ rules, entries, onNav }) {
 
 window.RoutinesAPI = {
   SEED_ROUTINES, seedRoutines, DOW_LABELS, DOW_SHORT, DOW_INITIAL,
-  matchesRule, lastMatchTs, nextDueTs, ruleStatus,
+  matchesRule, lastMatchTs, nextDueTs, ruleStatus, nextMatchingDay, prevMatchingDay,
   recurrenceText, dueText, lastDoneText, shortDueChipText, routineToTodo, dayDiff,
   entryKind, ruleKind, KIND_ICON,
 };

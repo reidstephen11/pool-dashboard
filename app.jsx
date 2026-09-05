@@ -1247,7 +1247,7 @@ function App() {
       const before = window.RoutinesAPI.ruleStatus(rule, prevEntries, now);
       if (before.status === 'upcoming') continue;
       // Recompute next-due assuming this log entry as last-done.
-      const newNext = window.RoutinesAPI.nextDueTs(rule, entry.ts || now, now);
+      const newNext = window.RoutinesAPI.nextDueTs(rule, entry.ts || now, now, true);
       const nd = new Date(newNext);
       const dow = window.RoutinesAPI.DOW_SHORT[nd.getDay()];
       const dStr = nd.getDate() + ' ' + nd.toLocaleDateString('en-AU', { month: 'short' });
