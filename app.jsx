@@ -4,6 +4,12 @@ const Icon = window.Icon;
 const KIND_ICON = window.RoutinesAPI.KIND_ICON;
 const entryKind = window.RoutinesAPI.entryKind;
 
+// User-facing app version, shown on the Home hero so a phone can confirm it
+// picked up the latest deploy. Bump this when shipping a change you want to
+// be able to check on-device. Separate from the backup-file `version` field
+// and from STATE_REV (those are data-format revisions).
+const APP_VERSION = '2.5';
+
 // Normalize dose text from the Poolwerx PDF: consistent units ("mls" → "mL").
 // Both rules are case-insensitive: the report is not consistent about unit case,
 // and an uppercase "2.2 KG" used to pass through unnormalised.
@@ -527,13 +533,16 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
                 {hasTest ? (openCount === 0 ? 'All caught up.' : (openCount === 1 ? '1 thing needs attention.' : openCount + ' things need attention.')) : 'Upload a report to get started.'}
               </div>
             </div>
-            {hasTest && (
-              <button className="chip-btn" onClick={onUpload} disabled={uploading}
-                aria-label="Upload a new Poolwerx test PDF"
-                style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 5, opacity: uploading ? 0.6 : 1 }}>
-                <Icon name="upload" size={12} /> {uploading ? 'Parsing…' : 'New test'}
-              </button>
-            )}
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+              <span className="t-label t-num" style={{ color: 'var(--hero-dim)' }} aria-label={'App version ' + APP_VERSION}>v{APP_VERSION}</span>
+              {hasTest && (
+                <button className="chip-btn" onClick={onUpload} disabled={uploading}
+                  aria-label="Upload a new Poolwerx test PDF"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, opacity: uploading ? 0.6 : 1 }}>
+                  <Icon name="upload" size={12} /> {uploading ? 'Parsing…' : 'New test'}
+                </button>
+              )}
+            </div>
           </div>
           {hasTest && (
             <div style={{ display: 'flex', gap: 18, color: 'var(--hero-dim)', fontSize: 12, fontWeight: 400, fontVariantNumeric: 'tabular-nums' }}>
