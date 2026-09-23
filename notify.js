@@ -147,8 +147,9 @@
     }).catch(function () { return 0; });
   }
 
-  // Notify about brand-new PDF action items (foreground only — these only ever
-  // appear from an upload the user just performed).
+  // Notify about actions a test just added (PDF upload or remote sync).
+  // Foreground only — the service worker stashes a pending report but does not
+  // notify, so this fires once, when the page actually applies it.
   function notifyTodos(count, firstLabel, dateStr) {
     if (!count) return Promise.resolve();
     return isEnabled().then(function (on) {
