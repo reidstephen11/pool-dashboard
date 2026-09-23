@@ -19,11 +19,14 @@
 //     are CACHE FIRST. Every one of those URLs carries an immutable version, so
 //     a cached copy cannot be wrong — and that is where the load time goes.
 //   - Anything else is not intercepted at all.
+//   - The remote water-test JSON (sync/…/latest.json) is not intercepted either.
+//     It must stay network-fresh; caching it would let an offline open apply a
+//     stale report. The page fetches it with cache: 'no-store'.
 //
 // Bump CACHE when the precache list changes.
-importScripts('notify-core.js');
+importScripts('notify-core.js', 'sync-report.js');
 
-var CACHE = 'pool-dashboard-v1';
+var CACHE = 'pool-dashboard-v2';
 
 // Same-origin shell. Relative so it works from the /pool-dashboard/ subpath.
 var APP_SHELL = [
@@ -34,6 +37,7 @@ var APP_SHELL = [
   'routines.jsx',
   'notify-core.js',
   'notify.js',
+  'sync-report.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/badge-96.png',
@@ -88,6 +92,9 @@ self.addEventListener('fetch', function (event) {
   try { url = new URL(req.url); } catch (e) { return; }
   var sameOrigin = url.origin === self.location.origin;
 
+  // Remote sync JSON: let the browser handle it. Do not cache.
+  if (sameOrigin && /\/sync\/[^/]+\/latest\.json$/.test(url.pathname)) return;
+
   if (!sameOrigin && !isCacheableVendor(req.url)) return; // leave everything else alone
 
   // Same-origin app code and navigations: network first, cache as fallback.
@@ -130,11 +137,38 @@ self.addEventListener('fetch', function (event) {
   );
 });
 
-// Fires roughly daily on installed PWAs (Android/Chromium). Reads the schedule
-// the app mirrored into IndexedDB and notifies any routine that has come due.
+// Stash a published water-test report for the page to apply on next open.
+// The worker cannot write localStorage. Only a classified report is stored
+// (chemistry + date + recommendations), never the raw file.
+function stashRemoteReport() {
+  var sync = self.PoolSync;
+  var core = self.PoolNotifyCore;
+  if (!sync || !core) return Promise.resolve();
+  return sync.fetchReport().then(function (doc) {
+    var c = sync.classify(doc);
+    if (!c || c.kind !== 'report') return;
+    return core.idbGet('pendingRemoteReport').then(function (cur) {
+      if (cur && cur.id === c.id) return;
+      if (cur && cur.testedAtMs != null && c.testedAtMs != null && cur.testedAtMs > c.testedAtMs) return;
+      return core.idbSet('pendingRemoteReport', {
+        id: c.id,
+        parsed: c.parsed,
+        testedAtMs: c.testedAtMs,
+        stashedAt: Date.now()
+      });
+    });
+  }).catch(function () {});
+}
+
+// Fires roughly daily on installed PWAs (Android/Chromium) when reminders are
+// enabled. Reads the schedule the app mirrored into IndexedDB and notifies any
+// routine that has come due, and stashes a remote water-test if one was published.
 self.addEventListener('periodicsync', function (event) {
   if (event.tag === 'pool-routine-check') {
-    event.waitUntil(self.PoolNotifyCore.runCheck(self.registration, Date.now()));
+    event.waitUntil(Promise.all([
+      self.PoolNotifyCore.runCheck(self.registration, Date.now()).catch(function () {}),
+      stashRemoteReport()
+    ]));
   }
 });
 

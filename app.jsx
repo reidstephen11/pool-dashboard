@@ -8,7 +8,7 @@ const entryKind = window.RoutinesAPI.entryKind;
 // picked up the latest deploy. Bump this when shipping a change you want to
 // be able to check on-device. Separate from the backup-file `version` field
 // and from STATE_REV (those are data-format revisions).
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.6';
 
 // Normalize dose text from the Poolwerx PDF: consistent units ("mls" → "mL").
 // Both rules are case-insensitive: the report is not consistent about unit case,
@@ -1147,6 +1147,114 @@ function waterTestEntry(ts) {
   };
 }
 
+// Turn a parsePoolwerxPDF() result (or the same shape from PoolSync.classify)
+// into the next todos / testData / log / pH history. Pure: no setState, no
+// localStorage. Both the file picker and the remote sync slot call this so a
+// published JSON report updates the app the same way a PDF does.
+//
+// opts.allowOlder — manual upload, after the user confirms replacing a newer test.
+// opts.skipSameDay — remote only. A report dated the same calendar day as the
+// loaded test must not wipe actions already on the list.
+function planTestImport(parsed, state, opts) {
+  opts = opts || {};
+  state = state || {};
+  const testData = state.testData || TEST;
+  const logEntries = state.logEntries || [];
+  const phHistory = state.phHistory || [];
+
+  if (!parsed || ((parsed.metricsParsed || 0) === 0 && (!parsed.recs || parsed.recs.length === 0))) {
+    return { applied: false, reason: 'empty' };
+  }
+
+  const newTs = parseTestDate(parsed.date);
+  const curTs = testData.date ? parseTestDate(testData.date) : null;
+  if (newTs && curTs && newTs < curTs && !opts.allowOlder) {
+    return { applied: false, reason: 'older', parsedDate: parsed.date, currentDate: testData.date };
+  }
+  if (opts.skipSameDay && newTs && curTs && newTs === curTs) {
+    return { applied: false, reason: 'same-day', parsedDate: parsed.date };
+  }
+
+  const vals = { ph: parsed.ph, fcl: parsed.freeCl, ccl: parsed.combCl, salt: parsed.salt, alk: parsed.alk, cah: parsed.caHard, cya: parsed.cya, phos: parsed.phos };
+  // Rebuilt from METRIC_DEFS rather than mapped over the persisted metrics.
+  // A metric that fails to parse must go to null, not keep last month's reading
+  // under this month's date, and target ranges must not stay frozen from the
+  // first save.
+  const updatedMetrics = METRIC_DEFS.map(def => {
+    const v = vals[def.id];
+    return v == null
+      ? { ...def, val: null, status: 'ok' }
+      : { ...def, val: v, status: calcStatus(v, def.lo, def.hi, def.min, def.max) };
+  });
+  const updated = { ...testData, date: parsed.date, pool: parsed.pool || testData.pool, lsi: parsed.lsi != null ? parsed.lsi : testData.lsi, metrics: updatedMetrics };
+
+  // An imported report IS a water test — log it (once per test date) so the
+  // "Get water tested" routine resets from the report's own date. Deduped on
+  // the calendar day, not the exact ts.
+  const testTs = newTs || Date.now();
+  const testDay = new Date(testTs); testDay.setHours(0, 0, 0, 0);
+  const nextLog = logEntries.some(en => {
+    if (en.kind !== 'watertest' || !en.ts) return false;
+    const d = new Date(en.ts); d.setHours(0, 0, 0, 0);
+    return d.getTime() === testDay.getTime();
+  }) ? logEntries : insertEntrySorted(logEntries, waterTestEntry(testTs));
+
+  let nextPh = phHistory;
+  if (parsed.ph != null) {
+    const dateLabel = (parsed.date || '').split(' ').slice(0, 2).join(' ') || 'now';
+    const exists = phHistory.some(p => p.label === dateLabel);
+    const hist = exists ? phHistory.map(p => p.label === dateLabel ? { ...p, val: parsed.ph } : p) : [...phHistory, { label: dateLabel, val: parsed.ph }];
+    nextPh = hist.slice(-6);
+  }
+
+  let newTodos = [];
+  if (parsed.recs && parsed.recs.length > 0) {
+    newTodos = parsed.recs.map((r, i) => {
+      // Attribute the action to the metric its own heading names.
+      const mapped = metricIdForParam(r.param);
+      const metric = (mapped && updatedMetrics.find(m => m.id === mapped)) ||
+        updatedMetrics.find(m => m.status !== 'ok' && r.action.toLowerCase().includes(m.label.toLowerCase()));
+      const status = metric && metric.status !== 'ok' ? metric.status : 'bad';
+      return {
+        id: i + 1,
+        pri: status === 'bad' ? 'HIGH' : 'MED',
+        label: normalizeDose(r.action),
+        reason: (metric && metric.val != null)
+          ? (metric.label + ' is ' + metric.val + ' · target ' + metric.lo + '–' + metric.hi + (metric.unit ? ' ' + metric.unit : ''))
+          : (r.param || 'From your latest report'),
+        color: status === 'bad' ? 'var(--bad)' : 'var(--warn)',
+        done: false,
+      };
+    });
+  } else {
+    newTodos = updatedMetrics.filter(m => m.status !== 'ok').map((m, i) => ({
+      id: i + 1, pri: m.status === 'bad' ? 'HIGH' : 'MED',
+      label: m.label + ' out of range',
+      reason: m.label + ' is ' + m.val + ' · target ' + m.lo + '–' + m.hi + ' ' + m.unit,
+      color: m.status === 'bad' ? 'var(--bad)' : 'var(--warn)', done: false,
+    }));
+  }
+
+  const dateLabel = parsed.date === 'Unknown date' ? 'that report' : parsed.date;
+  const toast = (parsed.metricsParsed || 0) < (parsed.metricsTotal || 8)
+    ? ('Loaded ' + parsed.metricsParsed + ' of ' + parsed.metricsTotal + ' results from ' + dateLabel + ' — check Chemistry')
+    : ('✓ Loaded test from ' + dateLabel);
+
+  return {
+    applied: true,
+    testData: updated,
+    logEntries: nextLog,
+    phHistory: nextPh,
+    todos: newTodos,
+    toast,
+    notify: newTodos.length ? {
+      count: newTodos.length,
+      label: newTodos[0] && newTodos[0].label,
+      date: parsed.date,
+    } : null,
+  };
+}
+
 // The robot was branded "Aiper Scuba" in older data; everything now says "Pool cleaner".
 const renamePoolCleaner = (s) => (s || '')
   .replace(/run\s+aiper(\s+scuba)?/gi, 'Run pool cleaner')
@@ -1201,11 +1309,26 @@ function App() {
     return (window.RoutinesAPI && window.RoutinesAPI.seedRoutines()) || [];
   });
   const [editorRule, setEditorRule] = React.useState(null); // null | {} (new) | rule (edit)
+  // Report id (or "date:…" when the file has no reportId) last applied from the
+  // remote sync slot. Kept with the rest of the state so a reload does not
+  // import the same file again.
+  const [lastRemoteReportId, setLastRemoteReportId] = React.useState(
+    (persisted && persisted.lastRemoteReportId != null && persisted.lastRemoteReportId !== '')
+      ? String(persisted.lastRemoteReportId) : null
+  );
+  const liveRef = React.useRef({});
+  const uploadingRef = React.useRef(false);
+  const applyRef = React.useRef(function () {});
+  const syncNowRef = React.useRef(function () {});
+  liveRef.current = { testData, logEntries, phHistory, lastRemoteReportId };
 
   React.useEffect(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify({ rev: STATE_REV, todos, testData, logEntries, phHistory, routines })); }
-    catch (e) { /* quota / private mode */ }
-  }, [todos, testData, logEntries, phHistory, routines]);
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        rev: STATE_REV, todos, testData, logEntries, phHistory, routines, lastRemoteReportId,
+      }));
+    } catch (e) { /* quota / private mode */ }
+  }, [todos, testData, logEntries, phHistory, routines, lastRemoteReportId]);
 
   // Reminders: re-arm on load if previously enabled, and re-check whenever the
   // app regains focus (catches routines that came due while it was backgrounded).
@@ -1350,118 +1473,46 @@ function App() {
     showToast('Routine removed');
   };
 
+  const applyTestPlan = (plan, remoteId) => {
+    if (!plan || !plan.applied) return;
+    setTestData(plan.testData);
+    setLogEntries(plan.logEntries);
+    setPhHistory(plan.phHistory);
+    setTodos(plan.todos);
+    if (remoteId) setLastRemoteReportId(remoteId);
+    if (window.PoolNotify && plan.notify) {
+      window.PoolNotify.notifyTodos(plan.notify.count, plan.notify.label, plan.notify.date);
+    }
+    showToast(plan.toast);
+  };
+  applyRef.current = applyTestPlan;
+
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.pdf')) { showToast('Please select a PDF file'); return; }
+    if (!file.name.toLowerCase().endsWith('.pdf')) { showToast('Please select a PDF file'); e.target.value = ''; return; }
+    uploadingRef.current = true;
     setUploading(true);
     showToast('Reading PDF…');
     try {
       const parsed = await parsePoolwerxPDF(file);
+      let plan = planTestImport(parsed, liveRef.current);
 
       // Nothing recognisable in the file — bail before touching state. Replacing
       // a good test and a live action list with an empty one because the user
       // picked the wrong PDF is not a recoverable mistake.
-      if (parsed.metricsParsed === 0 && (!parsed.recs || parsed.recs.length === 0)) {
+      if (!plan.applied && plan.reason === 'empty') {
         showToast("Couldn't read that PDF — no results found");
-        setUploading(false);
-        e.target.value = '';
         return;
       }
 
       // Guard against an older report silently overwriting newer results.
-      const newTs = parseTestDate(parsed.date);
-      const curTs = testData.date ? parseTestDate(testData.date) : null;
-      if (newTs && curTs && newTs < curTs &&
-          !window.confirm('That report is dated ' + parsed.date + ', which is older than your current test (' + testData.date + ').\n\nLoad it anyway and replace the newer results?')) {
-        setUploading(false);
-        e.target.value = '';
+      if (!plan.applied && plan.reason === 'older' &&
+          !window.confirm('That report is dated ' + plan.parsedDate + ', which is older than your current test (' + plan.currentDate + ').\n\nLoad it anyway and replace the newer results?')) {
         return;
       }
-
-      const vals = { ph: parsed.ph, fcl: parsed.freeCl, ccl: parsed.combCl, salt: parsed.salt, alk: parsed.alk, cah: parsed.caHard, cya: parsed.cya, phos: parsed.phos };
-      // Rebuilt from METRIC_DEFS rather than mapped over the persisted metrics.
-      // Two reasons: (1) a metric that fails to parse must go to null, not keep
-      // last month's reading under this month's date — the old code returned the
-      // previous metric object verbatim, so stale numbers were presented as new
-      // results and the fallback below even built to-dos from them; (2) the
-      // target ranges used to be frozen into localStorage on first save, so any
-      // later correction to a range never reached an existing install.
-      const updatedMetrics = METRIC_DEFS.map(def => {
-        const v = vals[def.id];
-        return v == null
-          ? { ...def, val: null, status: 'ok' }
-          : { ...def, val: v, status: calcStatus(v, def.lo, def.hi, def.min, def.max) };
-      });
-      const updated = { ...testData, date: parsed.date, pool: parsed.pool || testData.pool, lsi: parsed.lsi != null ? parsed.lsi : testData.lsi, metrics: updatedMetrics };
-      setTestData(updated);
-      // An imported report IS a water test — log it (once per test date) so the
-      // "Get water tested" routine resets from the report's own date. Deduped on
-      // the calendar day, not the exact ts: an unparseable date falls back to
-      // Date.now(), which never equals a stored ts and so logged a duplicate
-      // water test on every upload.
-      const testTs = newTs || Date.now();
-      const testDay = new Date(testTs); testDay.setHours(0, 0, 0, 0);
-      setLogEntries(prev => prev.some(en => {
-        if (en.kind !== 'watertest' || !en.ts) return false;
-        const d = new Date(en.ts); d.setHours(0, 0, 0, 0);
-        return d.getTime() === testDay.getTime();
-      }) ? prev : insertEntrySorted(prev, waterTestEntry(testTs)));
-      if (parsed.ph != null) {
-        const dateLabel = (parsed.date || '').split(' ').slice(0, 2).join(' ') || 'now';
-        setPhHistory(prev => {
-          const exists = prev.some(p => p.label === dateLabel);
-          const next = exists ? prev.map(p => p.label === dateLabel ? { ...p, val: parsed.ph } : p) : [...prev, { label: dateLabel, val: parsed.ph }];
-          return next.slice(-6);
-        });
-      }
-      // Build todos from Poolwerx recommendations first, fall back to out-of-range metrics
-      let newTodos = [];
-      if (parsed.recs && parsed.recs.length > 0) {
-        newTodos = parsed.recs.map((r, i) => {
-          // Attribute the action to the metric its own heading names. The old
-          // first-word substring test matched "ph" inside "PHOSPHATES", so a
-          // phosphate dose was captioned "pH is 7.6" and dropped to MED while
-          // Phosphates sat at 2.608 against a 0–0.2 target. The text search is
-          // kept only as a fallback for an unrecognised heading, and now needs
-          // the whole label rather than its first word.
-          const mapped = metricIdForParam(r.param);
-          const metric = (mapped && updatedMetrics.find(m => m.id === mapped)) ||
-            updatedMetrics.find(m => m.status !== 'ok' && r.action.toLowerCase().includes(m.label.toLowerCase()));
-          const status = metric && metric.status !== 'ok' ? metric.status : 'bad';
-          return {
-            id: i + 1,
-            pri: status === 'bad' ? 'HIGH' : 'MED',
-            label: normalizeDose(r.action),
-            reason: (metric && metric.val != null)
-              ? (metric.label + ' is ' + metric.val + ' · target ' + metric.lo + '–' + metric.hi + (metric.unit ? ' ' + metric.unit : ''))
-              : (r.param || 'From your latest report'),
-            color: status === 'bad' ? 'var(--bad)' : 'var(--warn)',
-            done: false,
-          };
-        });
-      } else {
-        // No recommendations parsed — fall back to out-of-range metric list
-        newTodos = updatedMetrics.filter(m => m.status !== 'ok').map((m, i) => ({
-          id: i + 1, pri: m.status === 'bad' ? 'HIGH' : 'MED',
-          label: m.label + ' out of range',
-          reason: m.label + ' is ' + m.val + ' · target ' + m.lo + '–' + m.hi + ' ' + m.unit,
-          color: m.status === 'bad' ? 'var(--bad)' : 'var(--warn)', done: false,
-        }));
-      }
-      setTodos(newTodos);
-      if (window.PoolNotify && newTodos.length) {
-        window.PoolNotify.notifyTodos(newTodos.length, newTodos[0] && newTodos[0].label, parsed.date);
-      }
-      // Say what actually came through. A blanket success toast hid partial
-      // parses completely: the hero showed the new date, Chemistry showed
-      // numbers, and nothing told the user some of them hadn't been read.
-      const dateLabel = parsed.date === 'Unknown date' ? 'that report' : parsed.date;
-      if (parsed.metricsParsed < parsed.metricsTotal) {
-        showToast('Loaded ' + parsed.metricsParsed + ' of ' + parsed.metricsTotal + ' results from ' + dateLabel + ' — check Chemistry');
-      } else {
-        showToast('✓ Loaded test from ' + dateLabel);
-      }
+      if (!plan.applied) plan = planTestImport(parsed, liveRef.current, { allowOlder: true });
+      applyTestPlan(plan);
     } catch (err) {
       // Distinguish "the CDN never arrived" from "this PDF isn't a Poolwerx
       // report" — the old message blamed the file for a network failure.
@@ -1470,10 +1521,123 @@ function App() {
         : 'Could not parse PDF — try another file';
       showToast(msg);
       console.error(err);
+    } finally {
+      uploadingRef.current = false;
+      setUploading(false);
+      e.target.value = '';
+      // A sync that arrived during the parse was skipped; look again now.
+      syncNowRef.current();
     }
-    setUploading(false);
-    e.target.value = '';
   };
+
+  // Remote sync slot (schema in sync-report.js). On load and whenever the app
+  // is focused: fetch latest.json with cache no-store. Placeholder, 404, an
+  // already-applied reportId, or an older test are silent no-ops. A newer
+  // report goes through planTestImport — the same writer as a PDF upload.
+  // The service worker cannot touch localStorage; if it stashed a pending
+  // report in IndexedDB, that is applied here too. Failures never clear state.
+  React.useEffect(() => {
+    let cancelled = false;
+    let running = false;
+    let again = false;
+
+    const clearPending = (id) => {
+      const core = window.PoolNotifyCore;
+      const Sync = window.PoolSync;
+      if (!core || !Sync) return Promise.resolve();
+      return core.idbGet('pendingRemoteReport').then((v) => {
+        if (!v) return;
+        const pending = Sync.classifyPending(v);
+        if (pending.kind !== 'report') return core.idbSet('pendingRemoteReport', null);
+        if (!id || pending.id === id) return core.idbSet('pendingRemoteReport', null);
+        if (pending.testedAtMs != null && liveRef.current.testData && liveRef.current.testData.date) {
+          const cur = parseTestDate(liveRef.current.testData.date);
+          if (cur != null && pending.testedAtMs <= cur) return core.idbSet('pendingRemoteReport', null);
+        }
+      }).catch((e) => { console.warn('[PoolSync] could not clear pending import', e); });
+    };
+
+    const once = async () => {
+      const Sync = window.PoolSync;
+      if (!Sync || uploadingRef.current) return;
+      let pendingRaw = null;
+      try {
+        if (window.PoolNotifyCore) pendingRaw = await window.PoolNotifyCore.idbGet('pendingRemoteReport');
+      } catch (e) {
+        console.warn('[PoolSync] pending read failed', e);
+      }
+      if (cancelled) return;
+
+      let remoteDoc = null;
+      let fetchFailed = false;
+      try {
+        remoteDoc = await Sync.fetchReport();
+      } catch (e) {
+        fetchFailed = true;
+        console.warn('[PoolSync] fetch failed', e);
+      }
+      if (cancelled || uploadingRef.current) return;
+
+      const remoteClass = fetchFailed ? null : Sync.classify(remoteDoc);
+      const pendingClass = Sync.classifyPending(pendingRaw);
+      if (remoteClass && remoteClass.kind === 'mismatch') {
+        console.warn('[PoolSync] ignored sync file (' + (remoteClass.reason || 'invalid') + ')');
+      }
+
+      const remoteOk = remoteClass && remoteClass.kind === 'report' ? remoteClass : null;
+      const pendingOk = pendingClass && pendingClass.kind === 'report' ? pendingClass : null;
+      // Offline: the stash is all we have. Online: the published file wins ties,
+      // and a newer stash (background sync saw a report this fetch missed) still applies.
+      const chosen = fetchFailed ? pendingOk : (remoteOk && pendingOk ? Sync.prefer(remoteOk, pendingOk) : (remoteOk || pendingOk));
+      if (!chosen) return;
+
+      if (chosen.id && chosen.id === liveRef.current.lastRemoteReportId) {
+        await clearPending(chosen.id);
+        return;
+      }
+
+      const plan = planTestImport(chosen.parsed, liveRef.current, { skipSameDay: true });
+      if (cancelled || uploadingRef.current) return;
+      if (!plan.applied) {
+        if (plan.reason === 'same-day' && chosen.id) setLastRemoteReportId(chosen.id);
+        if (plan.reason === 'older' || plan.reason === 'same-day') await clearPending(chosen.id);
+        return;
+      }
+
+      applyRef.current(plan, chosen.id);
+      console.info('[PoolSync] imported ' + chosen.id);
+      await clearPending(chosen.id);
+    };
+
+    const run = async () => {
+      if (running) { again = true; return; }
+      running = true;
+      try {
+        do {
+          again = false;
+          await once();
+        } while (again && !cancelled);
+      } catch (e) {
+        console.warn('[PoolSync] import failed', e);
+      } finally {
+        running = false;
+      }
+    };
+
+    syncNowRef.current = () => { run(); };
+    run();
+    const onWake = () => {
+      if (document.visibilityState === 'visible') run();
+    };
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', onWake);
+    return () => {
+      cancelled = true;
+      syncNowRef.current = function () {};
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', onWake);
+    };
+  }, []);
 
   const triggerUpload = () => fileRef.current && fileRef.current.click();
 
@@ -1483,7 +1647,7 @@ function App() {
         app: 'poolDashboard',
         version: '2.4',
         exportedAt: new Date().toISOString(),
-        data: { rev: STATE_REV, todos, testData, logEntries, phHistory, routines },
+        data: { rev: STATE_REV, todos, testData, logEntries, phHistory, routines, lastRemoteReportId },
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -1517,6 +1681,10 @@ function App() {
         if (Array.isArray(data.logEntries)) setLogEntries(data.logEntries);
         if (Array.isArray(data.phHistory)) setPhHistory(data.phHistory);
         if (Array.isArray(data.routines)) setRoutines(data.routines.map(r => r.createdTs ? r : { ...r, createdTs: Date.now() }));
+        if (Object.prototype.hasOwnProperty.call(data, 'lastRemoteReportId')) {
+          const id = data.lastRemoteReportId;
+          setLastRemoteReportId(id == null || id === '' ? null : String(id));
+        }
         showToast('✓ Backup restored');
       } catch (err) {
         console.error(err);

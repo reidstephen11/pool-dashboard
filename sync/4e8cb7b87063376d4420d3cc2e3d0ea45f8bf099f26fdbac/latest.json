@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "reportId": null,
+  "testedAt": null,
+  "source": null,
+  "publishedAt": null,
+  "metrics": null,
+  "recs": [],
+  "_note": "Placeholder. A real report sets reportId and testedAt; both null is a no-op. Chemistry, report date, and recommendations only — no customer name, address, email, or phone."
+}
