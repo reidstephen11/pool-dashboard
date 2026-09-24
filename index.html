@@ -11,12 +11,34 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<script>
+  // Startup check. #boot says "Loading…" until the app renders over it. If a
+  // script fails to download or throws before that, or nothing has rendered
+  // after 30s, it says so and offers a reload. The page used to stay blank.
+  // Registered here, ahead of the library scripts, so their failures count too.
+  (function () {
+    var broken = false;
+    function show() {
+      var el = document.getElementById('boot');
+      if (!el) return;
+      el.innerHTML = 'Pool Dashboard couldn\u2019t start. Check your connection and try again.' +
+        '<br><button type="button" onclick="location.reload()" style="margin-top:14px;min-height:44px;padding:10px 20px;border-radius:12px;border:1px solid var(--hairline);background:var(--surface);color:var(--ink);font:inherit;cursor:pointer">Reload</button>';
+    }
+    function fail() { broken = true; show(); }
+    window.addEventListener('error', function (e) {
+      var t = e.target;
+      if (!t || t === window || t.tagName === 'SCRIPT') fail();
+    }, true);
+    document.addEventListener('DOMContentLoaded', function () { if (broken) show(); });
+    setTimeout(fail, 30000);
+  })();
+</script>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
-<div id="root" style="width:100%;min-height:100vh;"></div>
+<div id="root" style="width:100%;min-height:100vh;"><div id="boot" role="status" style="padding:56px 20px;text-align:center;color:var(--muted);font-size:13px;line-height:1.5">Loading Pool Dashboard…</div></div>
 <script src="notify-core.js"></script>
 <script src="notify.js"></script>
 <script src="sync-report.js"></script>

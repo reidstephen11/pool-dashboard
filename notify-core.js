@@ -80,9 +80,13 @@
     return { due: due, notified: next };
   }
 
+  // Whole calendar days between the due day and today. Elapsed ms / DAY_MS is
+  // off by one around a daylight-saving change (a 25-hour day).
   function overdueDays(item, now) {
     if (item.dueTs == null) return 0;
-    return Math.max(0, Math.floor((now - item.dueTs) / DAY_MS));
+    var a = new Date(now); a.setHours(0, 0, 0, 0);
+    var b = new Date(item.dueTs); b.setHours(0, 0, 0, 0);
+    return Math.max(0, Math.round((a.getTime() - b.getTime()) / DAY_MS));
   }
 
   // Fire one notification per due routine. Each call is caught individually so a

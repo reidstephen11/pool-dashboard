@@ -1,0 +1,12 @@
+{
+  "name": "pool-dashboard",
+  "private": true,
+  "description": "Pool water chemistry, routines and action list. Static site on GitHub Pages.",
+  "scripts": {
+    "test": "node sync-report.test.js && node app.test.js",
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "@babel/standalone": "7.29.0"
+  }
+}

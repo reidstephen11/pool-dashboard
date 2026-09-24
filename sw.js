@@ -11,10 +11,12 @@
 // The handler below keeps the original guarantee intact:
 //
 //   - Same-origin app code (index.html, app.jsx, routines.jsx, styles.css, …) is
-//     NETWORK FIRST. Fresh code always wins when there is a connection, so a
-//     deploy lands on the next load exactly as it did before, and a stale
-//     app.jsx can never be served against a fresh index.html. The cache is only
-//     a fallback for when the network fails.
+//     NETWORK FIRST. Fresh code wins when the connection answers, so a deploy
+//     lands on the next load exactly as it did before. The cache is the
+//     fallback when the network fails — or takes longer than NETWORK_WAIT_MS
+//     and a cached copy exists. Without that limit a weak backyard signal kept
+//     the app on a blank page until the request gave up. The slow response
+//     still refreshes the cache, so the next open is current.
 //   - The pinned CDN bundles (React, ReactDOM, Babel, pdf.js) and Google Fonts
 //     are CACHE FIRST. Every one of those URLs carries an immutable version, so
 //     a cached copy cannot be wrong — and that is where the load time goes.
@@ -26,6 +28,19 @@
 // Bump CACHE when the precache list changes.
 importScripts('notify-core.js', 'sync-report.js');
 
+var NETWORK_WAIT_MS = 3000;
+// Once the network has been that slow, don't wait on it again for a while:
+// same-origin files come straight from the cache (and are still refreshed in
+// the background). Otherwise each step of a page load — the HTML, then its
+// scripts, then what they fetch — waited out NETWORK_WAIT_MS in turn, and a
+// load could mix the new HTML with cached scripts. Offline is unaffected.
+var SLOW_WINDOW_MS = 15000;
+var slowUntil = 0;
+
+// build.js rewrites everything between the two @build markers in the deployed
+// copy (the compiled app.js in place of the .jsx files, and no Babel). Keep the
+// markers and keep these three as plain array/string literals.
+// @build-start
 var CACHE = 'pool-dashboard-v2';
 
 // Same-origin shell. Relative so it works from the /pool-dashboard/ subpath.
@@ -53,6 +68,7 @@ var VENDOR = [
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
 ];
+// @build-end
 
 function isCacheableVendor(url) {
   return /^https:\/\/fonts\.(googleapis|gstatic)\.com\//.test(url) ||
@@ -99,26 +115,7 @@ self.addEventListener('fetch', function (event) {
 
   // Same-origin app code and navigations: network first, cache as fallback.
   if (sameOrigin) {
-    event.respondWith(
-      fetch(req).then(function (res) {
-        if (res && res.ok && res.type === 'basic') {
-          var copy = res.clone();
-          caches.open(CACHE).then(function (c) { c.put(req, copy); }).catch(function () {});
-        }
-        return res;
-      }).catch(function () {
-        return caches.match(req).then(function (hit) {
-          if (hit) return hit;
-          // A navigation to any in-app URL falls back to the shell.
-          if (req.mode === 'navigate') {
-            return caches.match('index.html').then(function (idx) {
-              return idx || caches.match('./') || Response.error();
-            });
-          }
-          return Response.error();
-        });
-      })
-    );
+    event.respondWith(networkFirst(event, req));
     return;
   }
 
@@ -136,6 +133,49 @@ self.addEventListener('fetch', function (event) {
     })
   );
 });
+
+// The cached copy of a request; a navigation to any in-app URL falls back to
+// the shell. Resolves undefined when nothing is cached.
+function cachedCopy(req) {
+  return caches.match(req).then(function (hit) {
+    if (hit || req.mode !== 'navigate') return hit;
+    return caches.match('index.html').then(function (idx) { return idx || caches.match('./'); });
+  });
+}
+
+// Network first, but answer from the cache once the network has taken
+// NETWORK_WAIT_MS (straight away inside SLOW_WINDOW_MS) — if there is a cached
+// copy. With none, keep waiting for the network.
+function networkFirst(event, req) {
+  var network = fetch(req);
+  // Store whatever the network returns, even after the cache has answered, and
+  // keep the worker alive until that write is done.
+  event.waitUntil(network.then(function (res) {
+    if (!res || !res.ok || res.type !== 'basic') return;
+    var copy = res.clone();
+    return caches.open(CACHE).then(function (c) { return c.put(req, copy); });
+  }).catch(function () {}));
+
+  return new Promise(function (resolve) {
+    var done = false;
+    function answer(res) { if (!done) { done = true; resolve(res); } }
+    var timer = setTimeout(function () {
+      cachedCopy(req).then(function (hit) {
+        if (!hit) return;
+        slowUntil = Date.now() + SLOW_WINDOW_MS;
+        answer(hit);
+      }, function () {});
+    }, Date.now() < slowUntil ? 0 : NETWORK_WAIT_MS);
+    network.then(function (res) {
+      clearTimeout(timer);
+      answer(res);
+    }, function () {
+      clearTimeout(timer);
+      cachedCopy(req).then(function (hit) { answer(hit || Response.error()); },
+        function () { answer(Response.error()); });
+    });
+  });
+}
 
 // Stash a published water-test report for the page to apply on next open.
 // The worker cannot write localStorage. Only a classified report is stored

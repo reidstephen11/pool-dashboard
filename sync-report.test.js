@@ -22,8 +22,13 @@ function report(over) {
   }, over || {});
 }
 
-const placeholder = JSON.parse(fs.readFileSync(
-  path.join(__dirname, 'sync/4e8cb7b87063376d4420d3cc2e3d0ea45f8bf099f26fdbac/latest.json'), 'utf8'));
+// The placeholder the slot held before the first real report was published.
+// The live file is checked separately at the end: it changes every time the
+// email automation publishes, so it can't be pinned to the placeholder.
+const placeholder = {
+  schema: 1, reportId: null, testedAt: null, source: null, publishedAt: null,
+  metrics: null, recs: [], _note: 'Placeholder. A real report sets reportId and testedAt; both null is a no-op.'
+};
 assert.strictEqual(S.classify(placeholder).kind, 'empty');
 assert.strictEqual(S.classify(null).kind, 'empty');
 assert.strictEqual(S.classify({}).kind, 'empty');
@@ -122,9 +127,35 @@ const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
 assert.ok(!readme.includes('4e8cb7b87063376d4420d3cc2e3d0ea45f8bf099f26fdbac'), 'README must not advertise the sync token');
 assert.ok(readme.includes('Remote sync'));
 
-const placeholderText = fs.readFileSync(
-  path.join(__dirname, 'sync/4e8cb7b87063376d4420d3cc2e3d0ea45f8bf099f26fdbac/latest.json'), 'utf8');
-assert.ok(!placeholderText.includes('@'));
-assert.ok(!/04\d{8}/.test(placeholderText));
+// The file the email automation publishes. It is either still the placeholder
+// or a real report — never something the app would reject — and it must not
+// carry contact details: the site and this repo are public.
+const publishedText = fs.readFileSync(path.join(__dirname, S.PATH), 'utf8');
+let published;
+try { published = JSON.parse(publishedText); } catch (e) {
+  assert.fail('The published sync file is not valid JSON: ' + e.message);
+}
+const kind = S.classify(published);
+assert.ok(kind.kind === 'empty' || kind.kind === 'report',
+  'The published sync file would be ignored by the app (' + (kind.reason || kind.kind) + ')');
+
+assert.ok(!/[^\s@"']+@[^\s@"']+\.[a-z]{2,}/i.test(publishedText), 'The published sync file contains an email address');
+const PERSONAL_KEY = /^(customer(_?name)?|client|first_?name|last_?name|full_?name|address|street(_?address)?|suburb|postcode|e_?mail(_?address)?|phone(_?number)?|mobile|contact)$/i;
+const AU_PHONE = /(?:\+?61[\s-]?|\b0)(?:4\d{2}[\s-]?\d{3}[\s-]?\d{3}|[2378][\s-]?\d{4}[\s-]?\d{4})\b/;
+(function walk(v, where) {
+  if (Array.isArray(v)) return v.forEach((x, i) => walk(x, where + '[' + i + ']'));
+  if (v && typeof v === 'object') {
+    return Object.keys(v).forEach((k) => {
+      assert.ok(!PERSONAL_KEY.test(k) && !(where === '' && /^name$/i.test(k)),
+        'The published sync file has a personal-details field: ' + (where ? where + '.' : '') + k);
+      walk(v[k], where ? where + '.' + k : k);
+    });
+  }
+  if (typeof v === 'string' && !/^(reportId|testedAt|publishedAt)$/.test(where)) {
+    assert.ok(!AU_PHONE.test(v), 'The published sync file contains a phone number at ' + where);
+  }
+})(published, '');
+assert.ok(!AU_PHONE.test('Add 800 mls of Vitalyse Phosphate Remover'));
+assert.ok(AU_PHONE.test('Call 0412 345 678') && AU_PHONE.test('(07) 3123 4567'.replace(/[()]/g, '')));
 
 console.log('sync-report.test.js ok');

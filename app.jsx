@@ -3,12 +3,13 @@
 const Icon = window.Icon;
 const KIND_ICON = window.RoutinesAPI.KIND_ICON;
 const entryKind = window.RoutinesAPI.entryKind;
+const dayStartTs = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
 // User-facing app version, shown on the Home hero so a phone can confirm it
 // picked up the latest deploy. Bump this when shipping a change you want to
 // be able to check on-device. Separate from the backup-file `version` field
 // and from STATE_REV (those are data-format revisions).
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.7';
 
 // Normalize dose text from the Poolwerx PDF: consistent units ("mls" → "mL").
 // Both rules are case-insensitive: the report is not consistent about unit case,
@@ -91,7 +92,10 @@ function loadPdfJs() {
 async function parsePoolwerxPDF(file) {
   await loadPdfJs();
   const buf = await file.arrayBuffer();
-  const pdfDoc = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  // isEvalSupported: false — pdf.js 3.x can run code generated from a crafted
+  // font (CVE-2024-4367). Reading text probably never reaches that path, but
+  // this switch rules it out; it only affects rendering speed, not text.
+  const pdfDoc = await window.pdfjsLib.getDocument({ data: buf, isEvalSupported: false }).promise;
   let txt = '';
   for (let i = 1; i <= pdfDoc.numPages; i++) {
     const page = await pdfDoc.getPage(i);
@@ -278,6 +282,10 @@ const METRIC_DEFS = [
   { id: 'phos', label: 'Phosphates',    lo: 0,   hi: 0.2, unit: 'ppm', min: 0,   max: 0.5  },
 ];
 
+// Minimum frame for a metric's trend chart, so a flat run of readings isn't
+// blown up to fill the height. pH has always been drawn on 7.0–8.5.
+const TREND_DOMAIN = { ph: [7.0, 8.5] };
+
 // Text equivalent for the status colour, used in accessible names so the
 // pass/warn/fail signal isn't carried by hue alone.
 const STATUS_WORD = { ok: 'in range', warn: 'borderline', bad: 'out of range' };
@@ -295,36 +303,59 @@ const TODOS = [];
 const PH_HISTORY = [];
 
 // ─── Trend Chart ────────────────────────────────
-function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5, unit = '', label = 'pH' }) {
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dayLabel = (ts) => { const d = new Date(ts); return d.getDate() + ' ' + MONTHS_SHORT[d.getMonth()]; };
+
+// Round tick values ("3,500 / 4,000 / 4,500") inside [min, max]: a 1/2/2.5/5
+// step giving at most four ticks. The old ticks sat at thirds of the domain
+// with one decimal, which is fine for pH but printed salt as "3380.0".
+function niceTicks(min, max) {
+  const span = max - min || 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(span / 3)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * pow).find(s => span / s <= 4);
+  const ticks = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) ticks.push(+v.toFixed(10));
+  const decimals = (String(+step.toFixed(10)).split('.')[1] || '').length;
+  return ticks.map(v => ({ v, text: v.toLocaleString('en-AU', { maximumFractionDigits: decimals }) }));
+}
+
+// One reading over the last few tests. Used for pH on Home and for every
+// metric on the Chemistry screen, so the scale comes from the data and the
+// target band; domainMin/domainMax only widen it (pH keeps its 7.0–8.5 frame).
+function TrendChart({ data, lo, hi, domainMin, domainMax, unit = '', label = 'pH', emptyText = 'Need at least 2 tests to show a trend' }) {
+  const gradId = 'trend' + React.useId().replace(/[^A-Za-z0-9]/g, '');
+  const [sel, setSel] = React.useState(null); // tapped point: shows its value and date
   data = (data || []).filter(d => d && typeof d.val === 'number' && Number.isFinite(d.val));
   if (data.length < 2) {
+    if (!emptyText) return null;
     return (
       <div style={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>
-        Need at least 2 tests to show a trend
+        {emptyText}
       </div>
     );
   }
   // Normalize: ensure lo <= hi
   if (lo > hi) { const t = lo; lo = hi; hi = t; }
 
-  // The visible domain used to be hardcoded to 7.0–8.5, so a reading outside it
-  // (a pH of 6.8, or any of the other metrics) was plotted above or below the
-  // card with no indication it had gone off-scale. Widen the domain to cover the
-  // data and the target band, with a little headroom.
+  // The visible domain covers the data and the target band, with a little
+  // headroom. When nothing is below zero the floor stays at zero, so the
+  // headroom never prints a negative tick under a concentration.
   const vals = data.map(d => d.val);
-  const dataMin = Math.min(...vals, lo, phMin);
-  const dataMax = Math.max(...vals, hi, phMax);
+  const dataMin = Math.min(...vals, lo, domainMin != null ? domainMin : lo);
+  const dataMax = Math.max(...vals, hi, domainMax != null ? domainMax : hi);
   const span = dataMax - dataMin || 1;
-  phMin = dataMin - span * 0.08;
-  phMax = dataMax + span * 0.08;
+  let yMin = dataMin - span * 0.08;
+  const yMax = dataMax + span * 0.08;
+  if (dataMin >= 0) yMin = Math.max(0, yMin);
 
+  const ticks = niceTicks(yMin, yMax);
   const W = 295, H = 90;
-  const pad = { l: 28, r: 8, t: 10, b: 20 };
+  const pad = { l: Math.max(24, 8 + Math.max(...ticks.map(t => t.text.length)) * 5.2), r: 8, t: 10, b: 20 };
   const cW = W - pad.l - pad.r;
   const cH = H - pad.t - pad.b;
 
   const px = (i) => pad.l + (i / (data.length - 1)) * cW;
-  const py = (v) => pad.t + cH - ((v - phMin) / (phMax - phMin)) * cH;
+  const py = (v) => pad.t + cH - ((v - yMin) / (yMax - yMin)) * cH;
 
   const pathD = data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${px(i)} ${py(d.val)}`).join(' ');
   const areaD = `${pathD} L ${px(data.length - 1)} ${pad.t + cH} L ${px(0)} ${pad.t + cH} Z`;
@@ -334,16 +365,22 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5, unit = '', label =
   const bandTop = Math.min(loY, hiY);
   const bandH   = Math.abs(loY - hiY);
 
-  // Tick labels at quartiles of [phMin, phMax]
-  const ticks = [phMin, phMin + (phMax - phMin) * 0.33, phMin + (phMax - phMin) * 0.66, phMax];
-
+  const u = unit ? ' ' + unit : '';
+  const inBand = (v) => v >= lo && v <= hi;
   const last = data[data.length - 1];
   const first = data[0];
   const dir = last.val > first.val ? 'rising' : last.val < first.val ? 'falling' : 'flat';
+  // Every reading is in the accessible name, so the tap labels are never the
+  // only way to get at a value.
   const summary = label + ' over the last ' + data.length + ' tests, ' + dir + ' from ' +
-    first.val + unit + ' in ' + first.label + ' to ' + last.val + unit + ' in ' + last.label +
-    '. Target range ' + lo + ' to ' + hi + unit + '. ' +
-    data.filter(d => d.val < lo || d.val > hi).length + ' of ' + data.length + ' outside target.';
+    first.val + u + ' in ' + first.label + ' to ' + last.val + u + ' in ' + last.label + '. ' +
+    'Readings: ' + data.map(d => d.label + ' ' + d.val).join(', ') + '. ' +
+    'Target range ' + lo + ' to ' + hi + u + '. ' +
+    data.filter(d => !inBand(d.val)).length + ' of ' + data.length + ' outside target.';
+
+  const selPt = sel != null && data[sel] ? data[sel] : null;
+  const selX = selPt ? Math.min(W - pad.r, Math.max(pad.l, px(sel))) : 0;
+  const selY = selPt ? py(selPt.val) : 0;
 
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible', display: 'block' }}
@@ -355,21 +392,21 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5, unit = '', label =
 
       {/* Area fill */}
       <defs>
-        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#0c1a22" stopOpacity="0.10" />
           <stop offset="100%" stopColor="#0c1a22" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={areaD} fill="url(#areaGrad)" />
+      <path d={areaD} fill={`url(#${gradId})`} />
 
       {/* Line */}
-      <path d={pathD} fill="none" stroke="#0c1a22" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={pathD} fill="none" stroke="#0c1a22" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
 
-      {/* Points */}
+      {/* Points — at least 8px across, with a 2px ring in the card colour */}
       {data.map((d, i) => (
-        <circle key={i} cx={px(i)} cy={py(d.val)} r={i === data.length - 1 ? 4.5 : 3}
-          style={{ fill: d.val >= lo && d.val <= hi ? 'var(--ok)' : 'var(--bad)' }}
-          stroke="#fff" strokeWidth={1.5} />
+        <circle key={i} cx={px(i)} cy={py(d.val)} r={i === data.length - 1 ? 5 : 4}
+          style={{ fill: inBand(d.val) ? 'var(--ok)' : 'var(--bad)', stroke: 'var(--surface)' }}
+          strokeWidth={2} />
       ))}
 
       {/* X labels — were #8ea1a9 (2.69:1) and #bccad0 (1.68:1) on white, i.e.
@@ -382,10 +419,10 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5, unit = '', label =
       ))}
 
       {/* Y labels */}
-      {ticks.map((v, i) => (
-        <text key={i} x={pad.l - 4} y={py(v) + 3} textAnchor="end"
-          style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: 'var(--faint)' }}>
-          {v.toFixed(1)}
+      {ticks.map((t, i) => (
+        <text key={i} x={pad.l - 4} y={py(t.v) + 3} textAnchor="end"
+          style={{ fontSize: 8.5, fontFamily: 'Geist Mono, ui-monospace, monospace', fill: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>
+          {t.text}
         </text>
       ))}
 
@@ -394,6 +431,20 @@ function TrendChart({ data, lo, hi, phMin = 7.0, phMax = 8.5, unit = '', label =
           full six-test history the word sat underneath the last point. The card
           header already states "Target lo–hi" and the band is drawn, so the
           caption was duplicating information as well as colliding. */}
+
+      {/* Tap a point to read it. Hit areas are 24px across — the dots alone
+          are too small to land on with a finger. */}
+      {data.map((d, i) => (
+        <circle key={'hit' + i} cx={px(i)} cy={py(d.val)} r={12} fill="transparent"
+          style={{ cursor: 'pointer' }} onClick={() => setSel(sel === i ? null : i)} />
+      ))}
+      {selPt && (
+        <text x={selX} y={selY < pad.t + 14 ? selY + 18 : selY - 10}
+          textAnchor={sel === 0 ? 'start' : sel === data.length - 1 ? 'end' : 'middle'}
+          style={{ fontSize: 10, fontFamily: 'Geist Mono, ui-monospace, monospace', fontWeight: 600, fill: 'var(--ink)', paintOrder: 'stroke', stroke: 'var(--surface)', strokeWidth: 3, strokeLinejoin: 'round', pointerEvents: 'none' }}>
+          {selPt.val + u + ' · ' + selPt.label}
+        </text>
+      )}
     </svg>
   );
 }
@@ -481,7 +532,7 @@ function TodoCard({ t, idx, onToggle, onDelete }) {
 }
 
 // ─── Dashboard Screen ────────────────────────────
-function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload, uploading, phHistory, routines, logEntries, onRoutineDone }) {
+function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload, uploading, testHistory, routines, logEntries, onRoutineDone }) {
   testData = testData || TEST;
   const hasTest = !!testData.date;
   // Looked up by id, not by array position. Persisted or imported test data can
@@ -490,7 +541,16 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
   const metric = (id) => (testData.metrics || []).find(m => m.id === id) ||
     METRIC_DEFS.find(m => m.id === id) || { val: null, status: 'ok', lo: 0, hi: 0, label: id };
   const ph = metric('ph');
+  const phTrend = trendFor(testHistory, 'ph');
   const badCount = (testData.metrics || []).filter(m => m.status !== 'ok').length;
+  // The pill counts borderline readings as issues, but its accessible name used
+  // to call all of them "outside target" — a borderline pH 7.2 is inside it.
+  const outCount = (testData.metrics || []).filter(m => m.status === 'bad').length;
+  const edgeCount = badCount - outCount;
+  const plural = (n, word) => n + ' ' + word + (n !== 1 ? 's' : '');
+  const issuesAria = badCount === 0 ? 'No metrics outside target. View all metrics'
+    : [outCount ? plural(outCount, 'metric') + ' outside target' : '',
+       edgeCount ? plural(edgeCount, 'metric') + ' borderline' : ''].filter(Boolean).join(', ') + '. View all metrics';
   const shortVal = (m) => (m.val == null ? '—' : (m.status === 'ok' ? 'OK' : m.val));
 
   // Compute routine todos (overdue + due) and upcoming list
@@ -560,7 +620,7 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
               <svg width="15" height="17" viewBox="0 0 15 17" fill="none" aria-hidden="true"><path d="M2 1h7l4 4v10a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="rgba(234,246,251,0.7)" strokeWidth="1.2"/><path d="M9 1v4h4" stroke="rgba(234,246,251,0.7)" strokeWidth="1.2"/></svg>
             </div>
             <div style={{ minWidth: 0, textAlign: 'left' }}>
-              <div style={{ color: 'var(--hero-fg)', fontFamily: 'Geist', fontWeight: 500, fontSize: 13.5, letterSpacing: '-0.005em' }}>{uploading ? 'Parsing PDF…' : 'Upload Poolwerx Report'}</div>
+              <div style={{ color: 'var(--hero-fg)', fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontWeight: 500, fontSize: 13.5, letterSpacing: '-0.005em' }}>{uploading ? 'Parsing PDF…' : 'Upload Poolwerx Report'}</div>
               <div style={{ color: 'var(--hero-dim)', fontSize: 11.5, marginTop: 2 }}>{uploading ? 'Please wait' : 'Tap to import latest test results'}</div>
             </div>
             <div aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--hero-dim-2)', fontSize: 18, lineHeight: 1 }}>→</div>
@@ -579,8 +639,7 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
           { label: 'Cl ' + (metric('fcl').val == null ? '—' : metric('fcl').val), status: metric('fcl').status, name: 'Free chlorine' },
           { label: 'Salt ' + shortVal(metric('salt')), status: metric('salt').status, name: 'Salt' },
           { label: badCount + ' issue' + (badCount !== 1 ? 's' : ''), status: badCount > 0 ? 'bad' : 'ok',
-            aria: badCount === 0 ? 'No metrics outside target. View all metrics'
-              : badCount + ' metric' + (badCount !== 1 ? 's' : '') + ' outside target. View all metrics' },
+            aria: issuesAria },
         ].map((p, i) => (
           <button type="button" key={i} className={`pill ${pillCls(p.status)} t-num`}
             aria-label={p.aria || (p.name + ' ' + p.label.split(' ').slice(1).join(' ') + ' — ' + STATUS_WORD[p.status] + '. View all metrics')}
@@ -590,7 +649,8 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
 
       {/* pH Trend */}
       <div className="sec-head">
-        <span>pH Trend · 6 months</span>
+        {/* Was "6 months": the chart holds the last six tests, however far apart. */}
+        <span>{'pH Trend' + (phTrend.length >= 2 ? ' · last ' + phTrend.length + ' tests' : '')}</span>
         {hasTest && <button type="button" className="link-btn" onClick={() => onNav('chemistry')}>All metrics →</button>}
       </div>
       {hasTest ? (
@@ -607,7 +667,7 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
             <div style={{ color: 'var(--muted)', fontSize: 11.5 }}>Target <span className="t-num">{ph.lo}–{ph.hi}</span></div>
           </div>
         </div>
-        <TrendChart data={phHistory || []} lo={ph.lo} hi={ph.hi} label="pH" />
+        <TrendChart data={phTrend} lo={ph.lo} hi={ph.hi} domainMin={TREND_DOMAIN.ph[0]} domainMax={TREND_DOMAIN.ph[1]} label="pH" />
       </div>
       ) : (
         <div className="chart-card" style={{ textAlign: 'center', padding: '32px 20px', color: 'var(--muted)' }}>
@@ -618,7 +678,7 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
       {/* To-do */}
       <div className="sec-head">
         <span>Action list</span>
-        <span style={{ color: 'var(--muted)', fontSize: 11.5, fontWeight: 400, fontFamily: 'Geist', textTransform: 'none', letterSpacing: '-0.005em' }} className="t-num">{(hasTest || mergedTodos.length) ? (openCount + ' open') : ''}</span>
+        <span style={{ color: 'var(--muted)', fontSize: 11.5, fontWeight: 400, fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', textTransform: 'none', letterSpacing: '-0.005em' }} className="t-num">{(hasTest || mergedTodos.length) ? (openCount + ' open') : ''}</span>
       </div>
       {window.UpcomingChips && <window.UpcomingChips rules={routines || []} entries={logEntries || []} onNav={() => onNav('routines')} />}
       <div className="todo-list" style={{ paddingBottom: 100, marginTop: 8 }}>
@@ -650,9 +710,12 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
 }
 
 // ─── Chemistry Screen ────────────────────────────
-function Chemistry({ onNav, testData, onReupload }) {
+function Chemistry({ onNav, testData, onReupload, testHistory }) {
   testData = testData || TEST;
   const hasTest = !!testData.date;
+  const series = {};
+  (testData.metrics || []).forEach(m => { series[m.id] = trendFor(testHistory, m.id); });
+  const waitingForTrend = (testData.metrics || []).some(m => m.val != null && series[m.id].length < 2);
   const pct = (v, mn, mx) => Math.max(0, Math.min(1, (v - mn) / (mx - mn)));
   const colors = { ok: 'var(--ok)', bad: 'var(--bad)', warn: 'var(--warn)' };
   const bgColors = { ok: 'var(--ok-tint)', bad: 'var(--bad-tint)', warn: 'var(--warn-tint)' };
@@ -694,6 +757,11 @@ function Chemistry({ onNav, testData, onReupload }) {
         </div>
       ) : (
       <div style={{ paddingTop: 16, paddingBottom: 100 }}>
+        {waitingForTrend && (
+          <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.45, padding: '0 18px 12px' }}>
+            Each reading shows a trend once it has two tests.
+          </div>
+        )}
         {testData.metrics.map((m, i) => {
           const loPct = pct(m.lo, m.min, m.max) * 100;
           const hiPct = pct(m.hi, m.min, m.max) * 100;
@@ -723,6 +791,13 @@ function Chemistry({ onNav, testData, onReupload }) {
                 <span style={{ color: 'var(--muted)' }}>target {m.lo}–{m.hi}</span>
                 <span>{m.max}</span>
               </div>
+              {series[m.id].length >= 2 && (
+                <div style={{ marginTop: 14 }}>
+                  <TrendChart data={series[m.id]} lo={m.lo} hi={m.hi} unit={m.unit} label={m.label}
+                    domainMin={TREND_DOMAIN[m.id] && TREND_DOMAIN[m.id][0]}
+                    domainMax={TREND_DOMAIN[m.id] && TREND_DOMAIN[m.id][1]} emptyText={null} />
+                </div>
+              )}
             </div>
           );
         })}
@@ -733,6 +808,40 @@ function Chemistry({ onNav, testData, onReupload }) {
 }
 
 // ─── Log Screen ──────────────────────────────────
+// Current time, refreshed every 30s and whenever the app comes back to the
+// foreground, so a form that defaults to "now" never shows a stale time.
+function useNow(intervalMs) {
+  const [now, setNow] = React.useState(Date.now);
+  React.useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const onVis = () => { if (document.visibilityState === 'visible') tick(); };
+    const id = setInterval(tick, intervalMs);
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', tick);
+    };
+  }, [intervalMs]);
+  return now;
+}
+
+// <input type="datetime-local"> value for a timestamp, and back. Read with an
+// explicit local-time constructor rather than new Date(string), whose reading
+// of a date-time with no time zone has not always been local in every browser.
+const pad2 = (n) => String(n).padStart(2, '0');
+function toLocalInput(ts) {
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+function fromLocalInput(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s || '');
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
 function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
   testData = testData || TEST;
   const [chemical, setChemical] = React.useState('Hydrochloric Acid');
@@ -748,14 +857,17 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
   const units = ['mL', 'L', 'g', 'kg', 'tabs'];
   const pending = todos.filter(t => !t.done);
 
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const localISO = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate()) + 'T' + pad(now.getHours()) + ':' + pad(now.getMinutes());
-  const [datetime, setDatetime] = React.useState(localISO);
-  const fmtDatetime = (iso) => {
-    try { return new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }); }
-    catch(e) { return iso; }
-  };
+  // null means "now": the field follows the clock until a time is picked, and
+  // goes back to following it after each save. It used to be fixed when the
+  // tab opened, so an app left on this tab overnight logged the next dose under
+  // yesterday's date — and moved routine due dates with it.
+  const now = useNow(30000);
+  const [pickedTime, setPickedTime] = React.useState(null);
+  const datetime = pickedTime || toLocalInput(now);
+  const setDatetime = (v) => setPickedTime(v || null);
+  // Stop following the clock once the field has focus, so the 30s refresh
+  // can't reset a time that is half typed in.
+  const pinTime = () => { if (!pickedTime) setPickedTime(datetime); };
 
   // Validation errors were rendered silently — no announcement and no focus
   // move, so on a screen reader nothing happened when Save did nothing.
@@ -776,8 +888,6 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
     }
     setSaved(true);
     if (onLogEntry) {
-      const d = new Date(datetime);
-      const dateStr = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
       onLogEntry({
         type: logType === 'chemical' ? `Added ${amount} ${unit} ${chemical}`
           : logType === 'backwash' ? 'Backwash'
@@ -785,14 +895,14 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
           : logType === 'watertest' ? 'Water test'
           : notes || 'Note',
         kind: logType,
-        date: dateStr,
-        ts: d.getTime(),
+        ts: (pickedTime && fromLocalInput(pickedTime)) || Date.now(),
         note: logType === 'note' ? '' : notes,
       });
     }
     // Reset form
     setNotes('');
     if (logType === 'chemical') setAmount('');
+    setPickedTime(null);
     setTimeout(() => setSaved(false), 2000);
   };
 
@@ -848,7 +958,7 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
           <div className="form-field" style={{ flex: 2 }}>
             <label className="form-label" htmlFor="log-amount">Amount</label>
             <input id="log-amount" value={amount} onChange={e => setAmount(e.target.value)} type="number" inputMode="decimal" min="0" step="any" placeholder="0"
-              style={{ fontFamily: 'Geist', fontSize: 16, fontWeight: 600, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+              style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 16, fontWeight: 600, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
           <div className="form-field" style={{ flex: 1 }}>
             <label className="form-label" htmlFor="log-unit">Unit</label>
@@ -860,8 +970,8 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
 
         <div className="form-field">
           <label className="form-label" htmlFor="log-datetime">Date &amp; Time</label>
-          <input id="log-datetime" type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
-            style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+          <input id="log-datetime" type="datetime-local" value={datetime} onFocus={pinTime} onChange={e => setDatetime(e.target.value)}
+            style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
         </div>
       </div>
       )}
@@ -871,13 +981,13 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
         <div className="log-form">
           <div className="form-field">
             <label className="form-label" htmlFor="log-datetime-2">Date &amp; Time</label>
-            <input id="log-datetime-2" type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
-              style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+            <input id="log-datetime-2" type="datetime-local" value={datetime} onFocus={pinTime} onChange={e => setDatetime(e.target.value)}
+              style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
           <div className="form-field">
             <label className="form-label" htmlFor="log-notes">Notes (optional)</label>
             <input id="log-notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. filter clean, good flow"
-              style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+              style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
         </div>
       )}
@@ -888,12 +998,12 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
           <div className="form-field">
             <label className="form-label" htmlFor="log-note-body">Note</label>
             <textarea id="log-note-body" value={notes} onChange={e => setNotes(e.target.value)} placeholder="What did you observe?"
-              rows={3} style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%', resize: 'none', lineHeight: 1.5 }} />
+              rows={3} style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%', resize: 'none', lineHeight: 1.5 }} />
           </div>
           <div className="form-field">
             <label className="form-label" htmlFor="log-datetime-3">Date &amp; Time</label>
-            <input id="log-datetime-3" type="datetime-local" value={datetime} onChange={e => setDatetime(e.target.value)}
-              style={{ fontFamily: 'Geist', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+            <input id="log-datetime-3" type="datetime-local" value={datetime} onFocus={pinTime} onChange={e => setDatetime(e.target.value)}
+              style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 14, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
         </div>
       )}
@@ -926,7 +1036,7 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
                   onClick={() => onToggle(t.id)}>
                   <span className="todo-check" aria-hidden="true" style={{ minWidth: 22 }}></span>
                   <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                    <span style={{ display: 'block', fontFamily: 'Geist', fontSize: 13, fontWeight: 500, color: 'var(--ink)', letterSpacing: '-0.005em' }}>{t.label}</span>
+                    <span style={{ display: 'block', fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 13, fontWeight: 500, color: 'var(--ink)', letterSpacing: '-0.005em' }}>{t.label}</span>
                     <span style={{ display: 'block', color: 'var(--muted)', fontSize: 11.5, marginTop: 2 }}>{t.reason}</span>
                   </span>
                   <span style={{ fontFamily: 'Geist Mono, ui-monospace, monospace', color: t.color, fontSize: 10, fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{t.pri}</span>
@@ -941,7 +1051,7 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
 }
 
 // ─── History Screen ──────────────────────────────
-function History({ onNav, entries: userEntries, onExport, onImport }) {
+function History({ onNav, entries: userEntries, onExport, onImport, onDeleteEntry }) {
   const entries = userEntries || [];
   const fileRef = React.useRef(null);
   const handlePick = (e) => {
@@ -990,10 +1100,16 @@ function History({ onNav, entries: userEntries, onExport, onImport }) {
                     <Icon name={KIND_ICON[entryKind(e)]} size={16} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontFamily: 'Geist', fontSize: 13.5, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: '-0.005em' }}>{e.type}</div>
+                    <div style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 13.5, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: '-0.005em' }}>{e.type}</div>
                     {e.note && <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 2 }}>{e.note}</div>}
                   </div>
                   <div className="t-num" style={{ color: 'var(--muted)', fontSize: 11, fontWeight: 400, flexShrink: 0, fontFamily: 'Geist Mono, ui-monospace, monospace' }}>{e.date}</div>
+                  {/* A wrong or accidental entry used to be permanent — there was
+                      no way to remove one. Deleting offers Undo in the toast. */}
+                  {onDeleteEntry && (
+                    <button type="button" className="row-del-btn" onClick={() => onDeleteEntry(e)}
+                      aria-label={'Delete entry: ' + e.type + ', ' + (e.date || 'no date')}>×</button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1103,7 +1219,7 @@ function ReminderToggle() {
             <div style={{ color: 'var(--muted)', fontSize: 11.5, marginTop: 2, lineHeight: 1.4 }}>Due routines are held until this time, so nothing wakes you overnight.</div>
           </div>
           <select id="notify-hour" value={hour} onChange={e => changeHour(+e.target.value)}
-            style={{ flexShrink: 0, fontFamily: 'Geist Mono', fontSize: 13, color: 'var(--accent)', background: 'var(--surface-2)', border: '1px solid var(--hairline-2)', borderRadius: 8, padding: '6px 10px', outline: 'none', appearance: 'none', cursor: 'pointer' }}>
+            style={{ flexShrink: 0, fontFamily: 'Geist Mono, ui-monospace, monospace', fontSize: 13, color: 'var(--accent)', background: 'var(--surface-2)', border: '1px solid var(--hairline-2)', borderRadius: 8, padding: '6px 10px', outline: 'none', appearance: 'none', cursor: 'pointer' }}>
             {NOTIFY_HOURS.map(h => <option key={h} value={h}>{hourLabel(h)}</option>)}
           </select>
         </div>
@@ -1139,16 +1255,87 @@ function insertEntrySorted(list, entry) {
   return copy;
 }
 
+const shortDate = (ts) => new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+
+// Save a backup file. `data` is the saved-state object Import reads back.
+function downloadBackup(data) {
+  const payload = { app: 'poolDashboard', version: '2.4', exportedAt: new Date().toISOString(), data };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'pool-dashboard-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function waterTestEntry(ts) {
   return {
     type: 'Water test · Poolwerx', kind: 'watertest',
-    date: new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }),
+    date: shortDate(ts),
     ts, note: '',
   };
 }
 
+// ─── Test history (trends) ──────────────────────
+// One point per test day, oldest first: { date, ts, vals: {ph, fcl, …}, lsi }.
+// Before 2.7 only pH was kept (phHistory, labels without a year), so the other
+// readings had nothing to chart.
+const HISTORY_MAX = 24; // about two years of monthly tests
+
+// Add a test, replacing any point already on the same calendar day.
+function upsertHistory(history, point) {
+  const day = dayStartTs(point.ts);
+  const rest = (history || []).filter(p => dayStartTs(p.ts) !== day);
+  rest.push(point);
+  rest.sort((a, b) => a.ts - b.ts);
+  return rest.slice(-HISTORY_MAX);
+}
+
+// One metric's readings for TrendChart: the last `limit` tests that have it.
+function trendFor(history, id, limit) {
+  return (history || [])
+    .filter(p => p && p.vals && typeof p.vals[id] === 'number')
+    .slice(-(limit || 6))
+    .map(p => ({ label: dayLabel(p.ts), val: p.vals[id] }));
+}
+
+// The old pH-only list, still saved alongside so that rolling the app back to
+// an earlier version keeps a current pH trend.
+const phHistoryFrom = (history) => trendFor(history, 'ph', 6);
+
+// Build the history the first time 2.7 loads: the old pH points plus the
+// loaded test. A pH label is "4 Sep" with no year, so it gets the latest year
+// that doesn't put it after the loaded test (they are the last six tests).
+function seedTestHistory(data) {
+  let history = [];
+  const td = data.testData;
+  const refTs = (td && td.date && parseTestDate(td.date)) || Date.now();
+  const refYear = new Date(refTs).getFullYear();
+  (Array.isArray(data.phHistory) ? data.phHistory : []).forEach(p => {
+    const m = p && typeof p.val === 'number' && /^(\d{1,2})\s+([A-Za-z]+)/.exec(String(p.label || ''));
+    if (!m) return;
+    let year = refYear;
+    let ts = parseTestDate(m[1] + ' ' + m[2] + ' ' + year);
+    if (ts != null && ts > refTs) ts = parseTestDate(m[1] + ' ' + m[2] + ' ' + (--year));
+    if (ts == null) return;
+    history = upsertHistory(history, { date: m[1] + ' ' + m[2] + ' ' + year, ts, vals: { ph: p.val }, lsi: null });
+  });
+  if (td && td.date && Array.isArray(td.metrics)) {
+    const ts = parseTestDate(td.date);
+    const vals = {};
+    td.metrics.forEach(mt => { if (mt && typeof mt.val === 'number') vals[mt.id] = mt.val; });
+    if (ts != null && Object.keys(vals).length) {
+      history = upsertHistory(history, { date: td.date, ts, vals, lsi: td.lsi != null ? td.lsi : null });
+    }
+  }
+  return history;
+}
+
 // Turn a parsePoolwerxPDF() result (or the same shape from PoolSync.classify)
-// into the next todos / testData / log / pH history. Pure: no setState, no
+// into the next todos / testData / log / trend history. Pure: no setState, no
 // localStorage. Both the file picker and the remote sync slot call this so a
 // published JSON report updates the app the same way a PDF does.
 //
@@ -1160,7 +1347,7 @@ function planTestImport(parsed, state, opts) {
   state = state || {};
   const testData = state.testData || TEST;
   const logEntries = state.logEntries || [];
-  const phHistory = state.phHistory || [];
+  const testHistory = state.testHistory || [];
 
   if (!parsed || ((parsed.metricsParsed || 0) === 0 && (!parsed.recs || parsed.recs.length === 0))) {
     return { applied: false, reason: 'empty' };
@@ -1199,13 +1386,15 @@ function planTestImport(parsed, state, opts) {
     return d.getTime() === testDay.getTime();
   }) ? logEntries : insertEntrySorted(logEntries, waterTestEntry(testTs));
 
-  let nextPh = phHistory;
-  if (parsed.ph != null) {
-    const dateLabel = (parsed.date || '').split(' ').slice(0, 2).join(' ') || 'now';
-    const exists = phHistory.some(p => p.label === dateLabel);
-    const hist = exists ? phHistory.map(p => p.label === dateLabel ? { ...p, val: parsed.ph } : p) : [...phHistory, { label: dateLabel, val: parsed.ph }];
-    nextPh = hist.slice(-6);
-  }
+  // Every reading goes into the trend history, placed by test date, so an
+  // older report loaded on purpose lands in the right spot rather than being
+  // drawn as the latest point. A report with recommendations but no readings
+  // leaves the history alone instead of blanking that day.
+  const histVals = {};
+  Object.keys(vals).forEach(k => { if (typeof vals[k] === 'number') histVals[k] = vals[k]; });
+  const nextHistory = Object.keys(histVals).length
+    ? upsertHistory(testHistory, { date: parsed.date, ts: testDay.getTime(), vals: histVals, lsi: parsed.lsi != null ? parsed.lsi : null })
+    : testHistory;
 
   let newTodos = [];
   if (parsed.recs && parsed.recs.length > 0) {
@@ -1244,7 +1433,7 @@ function planTestImport(parsed, state, opts) {
     applied: true,
     testData: updated,
     logEntries: nextLog,
-    phHistory: nextPh,
+    testHistory: nextHistory,
     todos: newTodos,
     toast,
     notify: newTodos.length ? {
@@ -1275,7 +1464,21 @@ function migrateData(data) {
     out.routines = out.routines.map(r => /aiper|scuba/i.test(r.name || '') ? { ...r, name: renamePoolCleaner(r.name) } : r);
   }
   if (Array.isArray(out.logEntries)) {
-    out.logEntries = out.logEntries.map(e => /aiper|scuba/i.test(e.type || '') ? { ...e, type: renamePoolCleaner(e.type) } : e);
+    out.logEntries = out.logEntries
+      .filter(e => e && typeof e === 'object')
+      .map(e => /aiper|scuba/i.test(e.type || '') ? { ...e, type: renamePoolCleaner(e.type) } : e)
+      // Newest first by ts, which lastMatchTs and the History grouping rely
+      // on. Entries used to be prepended in the order they were logged, so a
+      // back-dated one sat above newer ones. Entries with no ts stay last.
+      .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  }
+  if (!Array.isArray(out.testHistory)) {
+    out.testHistory = seedTestHistory(out);
+  } else {
+    out.testHistory = out.testHistory
+      .filter(p => p && typeof p.ts === 'number' && p.vals && typeof p.vals === 'object')
+      .sort((a, b) => a.ts - b.ts)
+      .slice(-HISTORY_MAX);
   }
   if ((out.rev || 0) < 1) {
     if (Array.isArray(out.routines) && !out.routines.some(r => r.match && r.match.logType === 'watertest')) {
@@ -1291,15 +1494,31 @@ function migrateData(data) {
   return out;
 }
 
+// ─── Back button ─────────────────────────────────
+// Tabs used to live only in React state, so the phone's Back button closed the
+// app from any tab. Home is now the bottom history entry, any other tab sits one
+// entry above it (switching between tabs replaces that entry), and the routine
+// editor adds one more: Back closes the editor, then returns Home, then leaves.
+const SCREENS = ['dashboard', 'chemistry', 'log', 'routines', 'history'];
+const screenFromHash = () => {
+  const h = (window.location.hash || '').slice(1);
+  return SCREENS.includes(h) ? h : 'dashboard';
+};
+
 function App() {
-  const persisted = migrateData(loadState());
-  const [screen, setScreen] = React.useState('dashboard');
+  // Read and migrate the saved state once. This used to run on every render,
+  // so each tab switch and toast re-parsed everything in localStorage.
+  const [persisted] = React.useState(() => migrateData(loadState()));
+  const [screen, setScreen] = React.useState(() => {
+    const st = window.history.state;
+    return st && st.pool && SCREENS.includes(st.screen) ? st.screen : screenFromHash();
+  });
   const [todos, setTodos] = React.useState((persisted && persisted.todos) || []);
   const [toast, setToast] = React.useState('');
   const [testData, setTestData] = React.useState((persisted && persisted.testData) || TEST);
   const [uploading, setUploading] = React.useState(false);
   const [logEntries, setLogEntries] = React.useState((persisted && persisted.logEntries) || []);
-  const [phHistory, setPhHistory] = React.useState((persisted && persisted.phHistory) || []);
+  const [testHistory, setTestHistory] = React.useState((persisted && persisted.testHistory) || []);
   // Routines: seed defaults on first load (persisted may exist without routines field from v3).
   // Rules missing createdTs (pre-v4.1 data) are anchored to now so they don't show as overdue.
   const [routines, setRoutines] = React.useState(() => {
@@ -1320,15 +1539,57 @@ function App() {
   const uploadingRef = React.useRef(false);
   const applyRef = React.useRef(function () {});
   const syncNowRef = React.useRef(function () {});
-  liveRef.current = { testData, logEntries, phHistory, lastRemoteReportId };
+  liveRef.current = { testData, logEntries, testHistory, lastRemoteReportId };
 
   React.useEffect(() => {
     try {
       localStorage.setItem(LS_KEY, JSON.stringify({
-        rev: STATE_REV, todos, testData, logEntries, phHistory, routines, lastRemoteReportId,
+        rev: STATE_REV, todos, testData, logEntries, testHistory, phHistory: phHistoryFrom(testHistory), routines, lastRemoteReportId,
       }));
     } catch (e) { /* quota / private mode */ }
-  }, [todos, testData, logEntries, phHistory, routines, lastRemoteReportId]);
+  }, [todos, testData, logEntries, testHistory, routines, lastRemoteReportId]);
+
+  React.useEffect(() => {
+    const st = window.history.state;
+    if (st && st.pool) {
+      // A reload of an entry this app made: keep the stack as it is, but don't
+      // come back to an editor entry with no editor open.
+      if (st.pool === 'editor') window.history.back();
+    } else {
+      window.history.replaceState({ pool: 'home', screen: 'dashboard' }, '', window.location.pathname + window.location.search);
+      // `screen` is still the first-render value here: the tab named in the URL.
+      if (screen !== 'dashboard') window.history.pushState({ pool: 'tab', screen }, '', '#' + screen);
+    }
+    const onPop = (e) => {
+      const s = e.state || {};
+      setEditorRule(null);
+      setScreen(SCREENS.includes(s.screen) ? s.screen : screenFromHash());
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const navigate = (next) => {
+    if (next === screen) return;
+    const st = window.history.state || {};
+    if (next === 'dashboard') {
+      if (st.pool === 'tab') window.history.back();
+      else window.history.replaceState({ pool: 'home', screen: 'dashboard' }, '', window.location.pathname + window.location.search);
+    } else if (st.pool === 'tab') {
+      window.history.replaceState({ pool: 'tab', screen: next }, '', '#' + next);
+    } else {
+      window.history.pushState({ pool: 'tab', screen: next }, '', '#' + next);
+    }
+    setScreen(next);
+  };
+  const openEditor = (rule) => {
+    window.history.pushState({ pool: 'editor', screen }, '', window.location.href);
+    setEditorRule(rule);
+  };
+  const closeEditor = () => {
+    setEditorRule(null);
+    if (window.history.state && window.history.state.pool === 'editor') window.history.back();
+  };
 
   // Reminders: re-arm on load if previously enabled, and re-check whenever the
   // app regains focus (catches routines that came due while it was backgrounded).
@@ -1372,66 +1633,89 @@ function App() {
   // Given a freshly-added log entry, find any routine it satisfies (that was due/overdue) and return a smart toast string.
   const buildSmartToast = (entry, prevEntries) => {
     if (!window.RoutinesAPI) return null;
+    const RAPI = window.RoutinesAPI;
     const now = Date.now();
+    const nextEntries = insertEntrySorted(prevEntries, entry);
     for (const rule of routines) {
-      if (!window.RoutinesAPI.matchesRule(rule, entry)) continue;
+      if (!RAPI.matchesRule(rule, entry)) continue;
       // Was it due/overdue before this entry?
-      const before = window.RoutinesAPI.ruleStatus(rule, prevEntries, now);
+      const before = RAPI.ruleStatus(rule, prevEntries, now);
       if (before.status === 'upcoming') continue;
-      // Recompute next-due assuming this log entry as last-done.
-      const newNext = window.RoutinesAPI.nextDueTs(rule, entry.ts || now, now, true);
-      const nd = new Date(newNext);
-      const dow = window.RoutinesAPI.DOW_SHORT[nd.getDay()];
+      // Next due with this entry in the log — from the newest matching entry,
+      // which is not this one if it was back-dated behind a newer log.
+      const nd = new Date(RAPI.ruleStatus(rule, nextEntries, now).dueTs);
+      const dow = RAPI.DOW_SHORT[nd.getDay()];
       const dStr = nd.getDate() + ' ' + nd.toLocaleDateString('en-AU', { month: 'short' });
       return '✓ ' + rule.name + ' — next due ' + dow + ' ' + dStr;
     }
     return null;
   };
 
+  // Entries go in by date, not on top: a back-dated one used to sit above
+  // newer entries and be read as the last time a routine was done.
   const onLogEntry = (entry) => {
     const ts = entry.ts || Date.now();
-    const now = new Date(ts);
-    const dateStr = now.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
-    const full = { ...entry, ts, date: dateStr };
+    const full = { ...entry, ts, date: shortDate(ts) };
     const smart = buildSmartToast(full, logEntries);
-    setLogEntries(prev => [full, ...prev]);
+    setLogEntries(prev => insertEntrySorted(prev, full));
     showToast(smart || ('✓ ' + entry.type + ' logged'));
   };
   const fileRef = React.useRef();
 
+  // Undo puts an action back only if the list still belongs to the same test.
+  // A new import restarts ids at 1, so an old action could land in, or be
+  // blocked by, the new test's list.
+  const sameTest = (forTest) => liveRef.current.testData === forTest;
+
   const onDelete = (id) => {
-    setTodos(prev => {
-      const idx = prev.findIndex(t => t.id === id);
-      if (idx === -1) return prev;
-      const removed = prev[idx];
-      showToast('Action removed', {
-        actionLabel: 'Undo',
-        onAction: () => {
+    const idx = todos.findIndex(t => t.id === id);
+    if (idx === -1) return;
+    const removed = todos[idx];
+    const forTest = testData;
+    setTodos(prev => prev.filter(t => t.id !== id));
+    showToast('Action removed', {
+      actionLabel: 'Undo',
+      onAction: () => {
+        if (sameTest(forTest)) {
           setTodos(cur => {
             if (cur.some(t => t.id === removed.id)) return cur;
             const next = cur.slice();
             next.splice(Math.min(idx, next.length), 0, removed);
             return next;
           });
-          setToast('');
-        },
-      });
-      return prev.filter(t => t.id !== id);
+        }
+        setToast('');
+      },
     });
   };
 
+  // A tap anywhere on an action card marks it done: it is logged, ticked, and
+  // dropped from the list. That used to be permanent — now the toast offers
+  // Undo, which takes the log entry back out and restores the action.
   const onToggle = (id) => {
-    setTodos(prev => {
-      const item = prev.find(t => t.id === id);
-      if (item && !item.done) {
-        const ts = Date.now();
-        const dateStr = new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
-        showToast('✓ Logged: ' + item.label);
-        setLogEntries(le => [{ type: item.label, kind: 'chemical', date: dateStr, note: item.reason, ts }, ...le]);
-        setTimeout(() => setTodos(t => t.filter(x => x.id !== id)), 700);
-        return prev.map(t => t.id === id ? { ...t, done: true } : t);
-      }
-      return prev;
+    const idx = todos.findIndex(t => t.id === id);
+    const item = todos[idx];
+    if (!item || item.done) return;
+    const ts = Date.now();
+    const entry = { type: item.label, kind: 'chemical', date: shortDate(ts), note: item.reason, ts };
+    const forTest = testData;
+    setTodos(prev => prev.map(t => t.id === id ? { ...t, done: true } : t));
+    setLogEntries(le => insertEntrySorted(le, entry));
+    const dropTimer = setTimeout(() => setTodos(t => sameTest(forTest) ? t.filter(x => x.id !== id) : t), 700);
+    showToast('✓ Logged: ' + item.label, {
+      actionLabel: 'Undo',
+      onAction: () => {
+        clearTimeout(dropTimer);
+        setLogEntries(le => le.filter(e => e !== entry));
+        if (sameTest(forTest)) {
+          setTodos(cur => {
+            const next = cur.filter(t => t.id !== id);
+            next.splice(Math.min(idx, next.length), 0, { ...item, done: false });
+            return next;
+          });
+        }
+        setToast('');
+      },
     });
   };
 
@@ -1440,7 +1724,6 @@ function App() {
     const rule = routines.find(r => r.id === routineId);
     if (!rule) return;
     const ts = Date.now();
-    const dateStr = new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
     // Build entry that matches this routine's matcher
     const m = rule.match || {};
     const kind = m.logType || 'note';
@@ -1449,10 +1732,26 @@ function App() {
       : kind === 'backwash' ? 'Backwash'
       : kind === 'watertest' ? 'Water test'
       : rule.name;
-    const entry = { type, kind, date: dateStr, ts, note: 'Marked done from routine' };
+    const entry = { type, kind, date: shortDate(ts), ts, note: 'Marked done from routine' };
     const smart = buildSmartToast(entry, logEntries);
-    setLogEntries(le => [entry, ...le]);
-    showToast(smart || ('✓ ' + rule.name + ' logged'));
+    setLogEntries(le => insertEntrySorted(le, entry));
+    showToast(smart || ('✓ ' + rule.name + ' logged'), {
+      actionLabel: 'Undo',
+      onAction: () => { setLogEntries(le => le.filter(e => e !== entry)); setToast(''); },
+    });
+  };
+
+  // History delete. Entries are matched by identity, which holds for as long
+  // as the toast (and so the Undo) is showing.
+  const onDeleteEntry = (entry) => {
+    setLogEntries(le => le.filter(e => e !== entry));
+    showToast('Entry deleted', {
+      actionLabel: 'Undo',
+      onAction: () => {
+        setLogEntries(le => le.includes(entry) ? le : insertEntrySorted(le, entry));
+        setToast('');
+      },
+    });
   };
 
   const onSaveRoutine = (rule) => {
@@ -1465,7 +1764,7 @@ function App() {
       }
       return [...prev, rule];
     });
-    setEditorRule(null);
+    closeEditor();
     showToast('✓ Routine saved');
   };
   const onDeleteRoutine = (id) => {
@@ -1477,7 +1776,7 @@ function App() {
     if (!plan || !plan.applied) return;
     setTestData(plan.testData);
     setLogEntries(plan.logEntries);
-    setPhHistory(plan.phHistory);
+    setTestHistory(plan.testHistory);
     setTodos(plan.todos);
     if (remoteId) setLastRemoteReportId(remoteId);
     if (window.PoolNotify && plan.notify) {
@@ -1643,22 +1942,7 @@ function App() {
 
   const onExport = () => {
     try {
-      const payload = {
-        app: 'poolDashboard',
-        version: '2.4',
-        exportedAt: new Date().toISOString(),
-        data: { rev: STATE_REV, todos, testData, logEntries, phHistory, routines, lastRemoteReportId },
-      };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const stamp = new Date().toISOString().slice(0, 10);
-      a.href = url;
-      a.download = `pool-dashboard-backup-${stamp}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadBackup({ rev: STATE_REV, todos, testData, logEntries, testHistory, phHistory: phHistoryFrom(testHistory), routines, lastRemoteReportId });
       showToast('✓ Backup downloaded');
     } catch (err) {
       console.error(err);
@@ -1675,11 +1959,11 @@ function App() {
         const raw = (parsed && parsed.data) ? parsed.data : parsed;
         if (!raw || typeof raw !== 'object') throw new Error('Invalid file');
         if (!window.confirm('Replace current data with the contents of this backup? This cannot be undone.')) return;
-        const data = migrateData(raw); // old backups: rename Aiper text, seed water-test routine
+        const data = migrateData(raw); // old backups: rename Aiper text, seed water-test routine and trend history
         if (Array.isArray(data.todos)) setTodos(data.todos);
-        if (data.testData && data.testData.metrics) setTestData(data.testData);
+        if (data.testData && Array.isArray(data.testData.metrics)) setTestData(data.testData);
         if (Array.isArray(data.logEntries)) setLogEntries(data.logEntries);
-        if (Array.isArray(data.phHistory)) setPhHistory(data.phHistory);
+        if (Array.isArray(data.testHistory)) setTestHistory(data.testHistory);
         if (Array.isArray(data.routines)) setRoutines(data.routines.map(r => r.createdTs ? r : { ...r, createdTs: Date.now() }));
         if (Object.prototype.hasOwnProperty.call(data, 'lastRemoteReportId')) {
           const id = data.lastRemoteReportId;
@@ -1696,11 +1980,11 @@ function App() {
   };
 
   const screens = {
-    dashboard: <Dashboard onNav={setScreen} todos={todos} onToggle={onToggle} onDelete={onDelete} toast={toast} testData={testData} onUpload={triggerUpload} uploading={uploading} phHistory={phHistory} routines={routines} logEntries={logEntries} onRoutineDone={onRoutineDone} />,
-    chemistry: <Chemistry onNav={setScreen} testData={testData} onReupload={triggerUpload} />,
-    log: <Log onNav={setScreen} todos={todos} onToggle={onToggle} testData={testData} onLogEntry={onLogEntry} />,
-    routines: window.RoutinesScreen ? <window.RoutinesScreen rules={routines} entries={logEntries} onAdd={() => setEditorRule({})} onEdit={setEditorRule} onDelete={onDeleteRoutine} banner={<ReminderToggle />} /> : null,
-    history: <History onNav={setScreen} entries={logEntries} onExport={onExport} onImport={onImport} />,
+    dashboard: <Dashboard onNav={navigate} todos={todos} onToggle={onToggle} onDelete={onDelete} toast={toast} testData={testData} onUpload={triggerUpload} uploading={uploading} testHistory={testHistory} routines={routines} logEntries={logEntries} onRoutineDone={onRoutineDone} />,
+    chemistry: <Chemistry onNav={navigate} testData={testData} onReupload={triggerUpload} testHistory={testHistory} />,
+    log: <Log onNav={navigate} todos={todos} onToggle={onToggle} testData={testData} onLogEntry={onLogEntry} />,
+    routines: window.RoutinesScreen ? <window.RoutinesScreen rules={routines} entries={logEntries} onAdd={() => openEditor({})} onEdit={openEditor} onDelete={onDeleteRoutine} banner={<ReminderToggle />} /> : null,
+    history: <History onNav={navigate} entries={logEntries} onExport={onExport} onImport={onImport} onDeleteEntry={onDeleteEntry} />,
   };
 
   const navItems = [
@@ -1718,8 +2002,8 @@ function App() {
         <window.RoutineEditor
           initial={editorRule && editorRule.id ? editorRule : null}
           onSave={onSaveRoutine}
-          onDelete={(id) => { onDeleteRoutine(id); setEditorRule(null); }}
-          onCancel={() => setEditorRule(null)} />
+          onDelete={(id) => { onDeleteRoutine(id); closeEditor(); }}
+          onCancel={closeEditor} />
       )}
       {/* app-shell carries the height: 100vh became 100dvh in CSS so the sticky
           nav isn't pushed under the mobile browser's collapsing URL bar. */}
@@ -1732,7 +2016,7 @@ function App() {
             <button key={n.id} type="button"
               className={`nav-item${screen === n.id ? ' active' : ''}`}
               aria-current={screen === n.id ? 'page' : undefined}
-              onClick={() => setScreen(n.id)}>
+              onClick={() => navigate(n.id)}>
               <span className="nav-icon" aria-hidden="true"><Icon name={n.icon} size={19} strokeWidth={screen === n.id ? 1.8 : 1.5} /></span>
               {n.label}
             </button>
@@ -1742,7 +2026,7 @@ function App() {
             gets announced. The Undo button is only rendered (and focusable) while
             a toast is actually showing. */}
         <div className={`toast${toast ? ' show' : ''}`} role="status" aria-live="polite">
-          {toast && toast.msg}
+          <span className="toast-msg">{toast && toast.msg}</span>
           {toast && toast.actionLabel && (
             <button type="button" className="toast-action" onClick={toast.onAction}>{toast.actionLabel}</button>
           )}
@@ -1752,5 +2036,51 @@ function App() {
   );
 }
 
+// ─── Crash screen ────────────────────────────────
+// When rendering throws, React unmounts the whole tree and the page goes blank
+// — and since the data that caused it is saved, it stayed blank on every open.
+// This keeps the saved data reachable: export it, reload, or reset.
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('[App] crashed', error, info && info.componentStack); }
+  render() { return this.state.error ? <CrashScreen error={this.state.error} /> : this.props.children; }
+}
+
+function CrashScreen({ error }) {
+  const exportSaved = () => {
+    let raw = null;
+    try { raw = localStorage.getItem(LS_KEY); } catch (e) { /* storage blocked */ }
+    let data = null;
+    try { data = raw ? JSON.parse(raw) : null; } catch (e) { data = { unreadable: raw }; }
+    downloadBackup(data);
+  };
+  const reset = () => {
+    if (!window.confirm('Reset deletes all pool data saved on this phone. Export it first if you want to keep it.\n\nReset now?')) return;
+    try { localStorage.removeItem(LS_KEY); } catch (e) { /* storage blocked */ }
+    window.location.reload();
+  };
+  return (
+    <div role="alert" style={{ padding: '56px 20px', textAlign: 'center' }}>
+      <h1 className="t-title" style={{ fontSize: 18, color: 'var(--ink)', marginBottom: 8 }}>Something went wrong</h1>
+      <div style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.5, maxWidth: 320, margin: '0 auto 22px' }}>
+        The app hit an error it couldn't recover from. Your data is still saved on this phone. Export a copy before trying anything else.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 280, margin: '0 auto' }}>
+        <button type="button" className="btn-primary" onClick={exportSaved}>Export my data</button>
+        <button type="button" className="btn-primary" onClick={() => window.location.reload()}
+          style={{ background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--hairline)' }}>Reload</button>
+        <button type="button" onClick={reset}
+          style={{ background: 'transparent', border: 'none', color: 'var(--bad)', fontSize: 12.5, fontWeight: 500, fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', cursor: 'pointer', padding: '10px 16px', minHeight: 44 }}>
+          Reset app data…
+        </button>
+      </div>
+      <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 18, fontFamily: 'Geist Mono, ui-monospace, monospace', wordBreak: 'break-word' }}>
+        {'v' + APP_VERSION + ' · ' + String((error && error.message) || error)}
+      </div>
+    </div>
+  );
+}
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+root.render(<ErrorBoundary><App /></ErrorBoundary>);

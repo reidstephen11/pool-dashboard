@@ -89,6 +89,16 @@ function seedRoutines() {
 const DAY_MS = 86400000;
 function dayStart(ts) { const d = new Date(ts); d.setHours(0,0,0,0); return d.getTime(); }
 function dayDiff(a, b) { return Math.round((dayStart(a) - dayStart(b)) / DAY_MS); }
+// Local midnight `n` calendar days after `ts`. Adding n × DAY_MS instead drifts
+// by an hour across a daylight-saving change: when clocks go back, midnight +
+// 24h is 11pm the same day, so interval routines came due a day early and
+// reminders fired at 11pm instead of after the "Not before" hour.
+function addDays(ts, n) {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + n);
+  return d.getTime();
+}
 
 // ─── Matching log entries against a rule ──────────
 function matchesRule(rule, entry) {
@@ -107,7 +117,10 @@ function matchesRule(rule, entry) {
   return false;
 }
 
-// Find timestamp of most recent matching log entry (entries newest-first)
+// Find timestamp of most recent matching log entry. Relies on entries being
+// newest-first by ts: app.jsx inserts every entry in date order and sorts
+// persisted/imported lists on load (a back-dated entry used to be put at the
+// top and then counted as the last time the job was done).
 function lastMatchTs(rule, entries) {
   for (const e of entries) {
     if (e && e.ts && matchesRule(rule, e)) return e.ts;
@@ -118,20 +131,19 @@ function lastMatchTs(rule, entries) {
 // Next / previous scheduled weekday at day precision. `inclusive` keeps `fromTs`
 // itself when that day is one of `days`; otherwise search starts the day after.
 function nextMatchingDay(fromTs, days, inclusive) {
-  let cursor = dayStart(fromTs);
-  if (!inclusive) cursor += DAY_MS;
+  let cursor = inclusive ? dayStart(fromTs) : addDays(fromTs, 1);
   for (let i = 0; i < 21; i++) {
     if (days.includes(new Date(cursor).getDay())) return cursor;
-    cursor += DAY_MS;
+    cursor = addDays(cursor, 1);
   }
   return null;
 }
 
 function prevMatchingDay(fromTs, days) {
-  let cursor = dayStart(fromTs) - DAY_MS;
+  let cursor = addDays(fromTs, -1);
   for (let i = 0; i < 21; i++) {
     if (days.includes(new Date(cursor).getDay())) return cursor;
-    cursor -= DAY_MS;
+    cursor = addDays(cursor, -1);
   }
   return null;
 }
@@ -151,7 +163,7 @@ function nextDueTs(rule, lastTs, nowMs, fromLog) {
   if (rule.schedule.type === 'interval') {
     const n = Math.max(1, rule.schedule.intervalDays || 7);
     if (!lastTs) return today;
-    return dayStart(lastTs) + n * DAY_MS;
+    return addDays(lastTs, n);
   }
 
   if (rule.schedule.type === 'dow') {
@@ -159,7 +171,7 @@ function nextDueTs(rule, lastTs, nowMs, fromLog) {
     if (days.length === 0) return today;
 
     if (!lastTs) {
-      return nextMatchingDay(today - 6 * DAY_MS, days, true) || today;
+      return nextMatchingDay(addDays(today, -6), days, true) || today;
     }
 
     const lastDay = dayStart(lastTs);
@@ -399,6 +411,11 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
   // a modal, close on Escape, move focus in on open and keep Tab inside.
   const sheetRef = React.useRef(null);
   const titleId = 'routine-editor-title';
+  // Read through a ref so the setup below runs once. With onCancel as a
+  // dependency it re-ran on every parent render (the parent passes a new
+  // function each time) and moved focus back to the first field mid-edit.
+  const onCancelRef = React.useRef(onCancel);
+  onCancelRef.current = onCancel;
   React.useEffect(() => {
     const prev = document.activeElement;
     const el = sheetRef.current;
@@ -407,7 +424,7 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
       if (first) first.focus();
     }
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); onCancel(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); onCancelRef.current(); return; }
       if (e.key !== 'Tab' || !el) return;
       const f = Array.from(el.querySelectorAll('input, select, button, textarea, [tabindex]:not([tabindex="-1"])'))
         .filter(n => !n.disabled && n.offsetParent !== null);
@@ -421,7 +438,7 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
       document.removeEventListener('keydown', onKey);
       if (prev && prev.focus) prev.focus();
     };
-  }, [onCancel]);
+  }, []);
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(12,12,13,0.55)', zIndex: 200, display: 'flex', alignItems: 'flex-end', animation: 'fadeUp 0.18s ease both' }} onClick={onCancel}>
@@ -438,7 +455,7 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
           <div className="form-field">
             <label className="form-label" htmlFor="routine-name">Name</label>
             <input id="routine-name" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. 500ml acid"
-              style={{ fontFamily: 'Geist', fontSize: 15, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+              style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 15, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
           </div>
 
           {/* Match type */}
@@ -499,7 +516,7 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
                   return (
                     <button type="button" key={i} onClick={() => toggleDay(i)}
                       aria-pressed={on} aria-label={DOW_LABELS[i]}
-                      style={{ aspectRatio: '1', minHeight: 40, background: on ? 'var(--ink)' : 'var(--surface)', color: on ? '#fff' : 'var(--ink-2)', border: '1px solid', borderColor: on ? 'var(--ink)' : 'var(--hairline)', borderRadius: 10, fontFamily: 'Geist', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                      style={{ aspectRatio: '1', minHeight: 40, background: on ? 'var(--ink)' : 'var(--surface)', color: on ? '#fff' : 'var(--ink-2)', border: '1px solid', borderColor: on ? 'var(--ink)' : 'var(--hairline)', borderRadius: 10, fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
                       <span aria-hidden="true">{l}</span>
                     </button>
                   );
@@ -514,7 +531,7 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
               <label className="form-label" htmlFor="routine-interval">Every</label>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 2 }}>
                 <input id="routine-interval" type="number" min={1} max={365} value={interval} onChange={e => setInt(e.target.value)}
-                  style={{ fontFamily: 'Geist', fontSize: 22, fontWeight: 600, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: 70 }} />
+                  style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 22, fontWeight: 600, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: 70 }} />
                 <span style={{ color: 'var(--muted)', fontSize: 14 }}>day{(parseInt(interval, 10) || 1) !== 1 ? 's' : ''} since last log</span>
               </div>
             </div>
@@ -558,7 +575,7 @@ function UpcomingChips({ rules, entries, onNav }) {
             style={{
               background: 'var(--surface)', border: '1px dashed var(--hairline)',
               borderRadius: 999, padding: '5px 10px 5px 8px',
-              fontFamily: 'Geist', fontSize: 11.5, color: 'var(--muted)',
+              fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 11.5, color: 'var(--muted)',
               display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
             }}>
             <span aria-hidden="true" style={{ color: 'var(--muted)', display: 'inline-flex' }}><Icon name={KIND_ICON[ruleKind(r)]} size={12} /></span>
@@ -576,7 +593,7 @@ function UpcomingChips({ rules, entries, onNav }) {
 window.RoutinesAPI = {
   SEED_ROUTINES, seedRoutines, DOW_LABELS, DOW_SHORT, DOW_INITIAL,
   matchesRule, lastMatchTs, nextDueTs, ruleStatus, nextMatchingDay, prevMatchingDay,
-  recurrenceText, dueText, lastDoneText, shortDueChipText, routineToTodo, dayDiff,
+  recurrenceText, dueText, lastDoneText, shortDueChipText, routineToTodo, dayDiff, dayStart, addDays,
   entryKind, ruleKind, KIND_ICON,
 };
 window.RoutinesScreen = RoutinesScreen;
