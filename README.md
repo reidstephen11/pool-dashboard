@@ -11,7 +11,7 @@ recurring maintenance (routines), and keeps a full activity history.
 
 | File | Purpose |
 |---|---|
-| `index.html` | Entry point — loads React 18 + Babel standalone from CDN, fonts from Google Fonts, the notify scripts, then the two JSX files |
+| `index.html` | Entry point — loads React 18 + Babel standalone from CDN, fonts from Google Fonts, the notify scripts, then the two JSX files. Shows "Loading…" until the app renders, and a Reload prompt if it never does |
 | `app.jsx` | Main app: PDF parser, Dashboard / Chemistry / Log / History screens, state + localStorage persistence |
 | `routines.jsx` | Recurring-rule engine, Routines screen, routine editor, and the shared stroke-icon set (`window.Icon`) — must load **before** `app.jsx` |
 | `styles.css` | Design tokens and all component CSS |
@@ -20,14 +20,37 @@ recurring maintenance (routines), and keeps a full activity history.
 | `sync-report.js` | Remote water-test slot: fetch URL, JSON schema check, and the map onto the PDF parser's result shape. Plain JS (page and service worker) |
 | `sw.js` | Service worker — offline cache (see below) + background routine checks (Periodic Background Sync) + notification clicks |
 | `manifest.webmanifest` · `icons/` | PWA manifest and app/notification icons (makes the app installable) |
-| `dist/index.standalone.html` | Old fully-inlined offline build (v4, stale — kept for reference until regenerated) |
+| `build.js` | Writes `_site/`, the deployed copy: JSX compiled ahead of time into one `app.js`, `index.html` without Babel, `sw.js` precaching the built files (see **Build and deploy**) |
+| `sync-report.test.js` · `app.test.js` | Tests (`npm test`): the sync format and the published sync file; routine dates, log order, trend history |
+| `.github/workflows/pages.yml` | Runs the tests and the build on every push and pull request, and deploys to Pages |
 
-JSX is transpiled in the browser by Babel standalone, so there is no build
-step: any static file server runs the app, e.g.
+Locally there is still no build step. Babel standalone compiles the JSX in the
+browser, so any static file server runs the app, e.g.
 
 ```
 python3 -m http.server 8000
 ```
+
+## Build and deploy
+
+Compiling in the browser costs a 3 MB download on first visit and several
+seconds on every open on a phone (measured with the CPU slowed 4× and the files
+served locally: about 6.7 s to the first screen, against 0.7 s for the
+pre-compiled build). So the deployed
+site is built: `npm ci && npm run build` writes `_site/` with the JSX compiled
+once by `build.js`. The build fails, rather than deploying something broken, if
+a file the service worker precaches is missing or the sync file is not included.
+
+`.github/workflows/pages.yml` runs `npm test` and the build on every push and
+pull request. On `main` it deploys `_site/` — **once Settings → Pages → Source
+is set to "GitHub Actions"**. While Pages still publishes the branch directly,
+the workflow only checks, and the site keeps working exactly as before (compiled
+in the browser).
+
+The tests do not block a deploy. The email automation publishes each report by
+pushing the sync file to `main`, and an unrelated failing test must not stop it
+going live. A failing test still marks the run red, and GitHub emails the
+person who pushed.
 
 ## Design system (v4 · "Deep Lagoon")
 
@@ -50,9 +73,24 @@ these tokens — no new hex colors, no drop shadows, no emoji.
 ## Data & persistence
 
 All state persists to `localStorage` under the key `poolDashboard_v2`
-(`todos`, `testData`, `logEntries`, `phHistory`, `routines`, and
+(`todos`, `testData`, `logEntries`, `testHistory`, `routines`, and
 `lastRemoteReportId` once a remote report has been applied). History →
 Export/Import moves data between browsers or devices as a JSON backup file.
+
+`testHistory` holds every reading of each test (one point per test day, oldest
+first, up to 24) and feeds the trend charts on Home and Chemistry. It was added
+in 2.7; before that only pH was kept, in `phHistory` (labels with no year). On
+first load that list is folded into `testHistory`, and a derived `phHistory` is
+still saved so an older version of the app keeps working after a rollback.
+
+`logEntries` is kept newest first by `ts`, which routine due dates rely on.
+Every write inserts in date order, so a back-dated entry lands in its place, and
+lists saved before that are sorted on load. Marking an action or routine done,
+and deleting a History entry, can be undone from the toast.
+
+If the app hits an error while drawing the screen, a recovery screen replaces
+it with **Export my data**, **Reload** and **Reset app data**. Without it the page
+went blank on every open, because the data that caused the error was saved.
 Log entries carry a `kind` (`chemical | backwash | aiper | watertest | note`).
 `aiper` is the pool-cleaner kind — the UI says "Pool cleaner" everywhere, but
 the stored token is kept so existing data keeps matching. Legacy entries with
@@ -101,17 +139,28 @@ with no connection — which is the normal case standing next to the pool.
 Two cache strategies, chosen so that going offline can never mean running stale
 code:
 
-- **Same-origin app files are network-first.** A deploy lands on the next load
-  exactly as it did before the service worker existed; the cache is only a
-  fallback for when the network fails. This matters in a buildless app, where a
-  stale `app.jsx` served against a fresh `index.html` would be a real hazard.
+- **Same-origin app files are network-first, with a 3 s limit.** A deploy lands
+  on the next load as long as the connection answers. The cache answers when the
+  network fails, or when it takes longer than 3 s and a cached copy exists. The
+  slow response still refreshes the cache for next time. After one slow request,
+  the rest of that load (15 s) comes straight from the cache, so a weak signal
+  costs about 3 s once rather than per file, and a load doesn't mix fresh and
+  cached files. The deployed build is a single `app.js`, which removes the
+  remaining case where cached and fresh scripts could meet.
 - **CDN bundles and Google Fonts are cache-first.** Every one of those URLs
   carries an immutable version (`react@18.3.1`, `pdf.js/3.11.174`, …) so a cached
   copy cannot be wrong, and this is where nearly all the load time goes.
 
 Anything else is not intercepted. The remote sync JSON is excluded on purpose
 so it cannot be served from the cache. Bump `CACHE` in `sw.js` when the precache
-list changes.
+list changes. `build.js` rewrites the block between the `@build-start` and
+`@build-end` markers for the deployed copy (`CACHE` gains a `-built` suffix), so
+keep those markers and keep `CACHE`, `APP_SHELL` and `VENDOR` as plain
+literals.
+
+Tabs are in the browser history (`#chemistry`, `#log`, …), so the phone's Back
+button returns to Home before it leaves the app, and closes the routine editor
+first when it's open.
 
 ## PDF parsing
 
@@ -172,11 +221,18 @@ An external automation can publish a water-test result so the app imports it
 the next time it is opened or brought into focus — no import button. The sync
 slot is a same-origin path hardcoded in `sync-report.js` (not listed here).
 The file is fetched with `cache: 'no-store'` and is not part of the service
-worker precache.
+worker precache. The long folder name keeps the file from being guessed, but it
+is not private: this repository is public, and anyone reading `sync-report.js`
+can find it. That's fine for pool readings; don't put anything in the file that
+you wouldn't publish.
 
-Until a real report is published, that file is a placeholder: `reportId` and
-`testedAt` are both null. The fetch is a silent no-op and does not touch
-`localStorage`.
+The file holds the latest published report (it began as a placeholder with
+`reportId` and `testedAt` both null, which the app treats as a silent no-op).
+`sync-report.test.js` checks whatever is published: it must be the placeholder
+or a report the app would accept, and must not contain an email address, a
+phone number, or a personal-details field such as `address` or `customer`.
+Don't change the path or the format without updating the automation that
+writes it.
 
 ### What the writer should publish
 

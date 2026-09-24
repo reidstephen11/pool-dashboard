@@ -1,0 +1,89 @@
+# Runs the tests and the build on every push and pull request. On main it also
+# deploys the built site (JSX compiled ahead of time, see build.js) to GitHub
+# Pages, but only once Settings → Pages → Source is "GitHub Actions". Until
+# then Pages keeps publishing the branch as it always has, and this workflow
+# only checks.
+#
+# The tests don't hold back the deploy. The email automation publishes each
+# water test by pushing sync/…/latest.json to main, and a failing test must not
+# stop a new report going live. A failure still turns the run red, and GitHub
+# emails you about it.
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Runs on main go one at a time, in order, so an older build never deploys
+# over a newer one. A waiting run is replaced by a newer push.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: _site
+
+  # Deploying while Pages still publishes the branch would fail, so look first.
+  pages-source:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: read
+    outputs:
+      deploy: ${{ steps.check.outputs.deploy }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          type=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .build_type 2>/dev/null || true)
+          echo "Pages build type: ${type:-unknown}"
+          if [ "$type" = "legacy" ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Built but not deployed::GitHub Pages still publishes straight from the branch. To serve the faster pre-compiled app, set Settings → Pages → Source to GitHub Actions."
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: [build, pages-source]
+    if: needs.pages-source.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
