@@ -14,6 +14,7 @@ const ICON_PATHS = {
   upload:  <g><path d="M10 13V4.5" /><path d="M6.5 8 10 4.5 13.5 8" /><path d="M4 15.5h12" /></g>,
   bell:    <g><path d="M10 3.4a4.4 4.4 0 0 0-4.4 4.4c0 3-1.2 4.1-1.8 4.7-.3.3-.1.8.3.8h11.8c.4 0 .6-.5.3-.8-.6-.6-1.8-1.7-1.8-4.7A4.4 4.4 0 0 0 10 3.4z" /><path d="M8.5 16.1a1.6 1.6 0 0 0 3 0" /></g>,
   vial:    <g><path d="M7.4 3h5.2" /><path d="M8.3 3v9.3a1.7 1.7 0 0 0 3.4 0V3" /><path d="M8.3 8.4h3.4" /></g>,
+  copy:    <g><rect x="7" y="7" width="9" height="9" rx="1.6" /><path d="M13 7V5.6A1.6 1.6 0 0 0 11.4 4H5.6A1.6 1.6 0 0 0 4 5.6v5.8A1.6 1.6 0 0 0 5.6 13H7" /></g>,
 };
 
 function Icon({ name, size = 20, strokeWidth = 1.5, style }) {

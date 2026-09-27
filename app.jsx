@@ -9,7 +9,7 @@ const dayStartTs = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); ret
 // picked up the latest deploy. Bump this when shipping a change you want to
 // be able to check on-device. Separate from the backup-file `version` field
 // and from STATE_REV (those are data-format revisions).
-const APP_VERSION = '2.7';
+const APP_VERSION = '2.8';
 
 // Normalize dose text from the Poolwerx PDF: consistent units ("mls" → "mL").
 // Both rules are case-insensitive: the report is not consistent about unit case,
@@ -710,7 +710,7 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
 }
 
 // ─── Chemistry Screen ────────────────────────────
-function Chemistry({ onNav, testData, onReupload, testHistory }) {
+function Chemistry({ onNav, testData, onReupload, testHistory, equipment }) {
   testData = testData || TEST;
   const hasTest = !!testData.date;
   const series = {};
@@ -750,13 +750,16 @@ function Chemistry({ onNav, testData, onReupload, testHistory }) {
         </div>
       </div>
 
+      {equipment}
+
       {!hasTest ? (
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--muted)' }}>
+        <div style={{ textAlign: 'center', padding: '40px 20px 100px', color: 'var(--muted)' }}>
           <div className="t-title" style={{ fontSize: 15, color: 'var(--ink)', marginBottom: 6 }}>No test data yet</div>
           <div style={{ fontSize: 12.5 }}>Upload a Poolwerx PDF from the Dashboard to see your water chemistry.</div>
         </div>
       ) : (
-      <div style={{ paddingTop: 16, paddingBottom: 100 }}>
+      <div style={{ paddingBottom: 100 }}>
+        <div className="sec-head"><span>Readings</span></div>
         {waitingForTrend && (
           <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.45, padding: '0 18px 12px' }}>
             Each reading shows a trend once it has two tests.
@@ -804,6 +807,186 @@ function Chemistry({ onNav, testData, onReupload, testHistory }) {
       </div>
       )}
     </div>
+  );
+}
+
+// ─── Equipment section (Chemistry screen) ────────
+// Chlorinator level and filter run times, with the date they were changed, and
+// the Copy for agent button. Shown whether or not a test has been loaded.
+const EQUIPMENT_EARLIER_SHOWN = 5;
+const eqInputStyle = { fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 16, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' };
+function fromDateInput(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function EquipmentSection({ history, onSave, onDelete, onCopy }) {
+  const list = history || [];
+  const current = list.length ? list[list.length - 1] : null;
+  const earlier = list.slice(0, -1).reverse();
+  const [form, setForm] = React.useState(null); // null while not editing
+  const [errMsg, setErrMsg] = React.useState('');
+  const errRef = React.useRef(null);
+  const pctRef = React.useRef(null);
+  const editBtnRef = React.useRef(null);
+  const wasEditing = React.useRef(false);
+  const today = toLocalInput(Date.now()).slice(0, 10);
+
+  // Focus the first field when the form opens, and the Change button when it closes.
+  React.useEffect(() => {
+    if (form && !wasEditing.current && pctRef.current) pctRef.current.focus();
+    if (!form && wasEditing.current && editBtnRef.current) editBtnRef.current.focus();
+    wasEditing.current = !!form;
+  }, [form]);
+
+  const startEdit = () => {
+    setErrMsg('');
+    setForm({
+      pct: current ? String(current.chlorinatorPct) : '',
+      start: current ? current.filterStart : '',
+      end: current ? current.filterEnd : '',
+      date: today,
+    });
+  };
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  const failWith = (msg) => {
+    setErrMsg(msg);
+    setTimeout(() => errRef.current && errRef.current.focus(), 0);
+  };
+
+  const save = (e) => {
+    e.preventDefault();
+    const pct = form.pct.trim() === '' ? NaN : Number(form.pct);
+    const start = (form.start || '').slice(0, 5);
+    const end = (form.end || '').slice(0, 5);
+    const ts = fromDateInput(form.date);
+    if (!(pct >= 0 && pct <= 100)) return failWith('Enter a chlorinator level from 0 to 100%');
+    if (!HHMM.test(start) || !HHMM.test(end)) return failWith('Enter the times the filter starts and stops');
+    if (start === end) return failWith('The filter start and stop times are the same');
+    if (ts == null) return failWith('Enter the date you changed the settings');
+    if (ts > fromDateInput(today)) return failWith("The date can't be in the future");
+    onSave({ ts, chlorinatorPct: Math.round(pct * 10) / 10, filterStart: start, filterEnd: end });
+    setForm(null);
+  };
+
+  const formStart = form && (form.start || '').slice(0, 5);
+  const formEnd = form && (form.end || '').slice(0, 5);
+  const runPreview = form && HHMM.test(formStart) && HHMM.test(formEnd) && formStart !== formEnd
+    ? 'Runs ' + durationLabel(filterMinutes(formStart, formEnd)) + ' a day' : null;
+
+  return (
+    <React.Fragment>
+      <div className="sec-head">
+        <span id="equipment-head">Equipment</span>
+        {!form && (
+          <button type="button" ref={editBtnRef} className="link-btn" onClick={startEdit}
+            aria-label={current ? 'Change equipment settings' : 'Set equipment settings'}>
+            {current ? 'Change' : 'Set up'}
+          </button>
+        )}
+      </div>
+
+      {form ? (
+        <form className="log-form" onSubmit={save} aria-labelledby="equipment-head" noValidate>
+          <div className="form-field">
+            <label className="form-label" htmlFor="eq-pct">Chlorinator output (%)</label>
+            <input id="eq-pct" ref={pctRef} type="number" inputMode="decimal" min="0" max="100" step="any" placeholder="e.g. 60"
+              value={form.pct} onChange={set('pct')} style={{ ...eqInputStyle, fontWeight: 600 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div className="form-field" style={{ flex: 1, minWidth: 0 }}>
+              <label className="form-label" htmlFor="eq-start">Filter starts</label>
+              <input id="eq-start" type="time" value={form.start} onChange={set('start')} style={eqInputStyle} />
+            </div>
+            <div className="form-field" style={{ flex: 1, minWidth: 0 }}>
+              <label className="form-label" htmlFor="eq-end">Filter stops</label>
+              <input id="eq-end" type="time" value={form.end} onChange={set('end')} style={eqInputStyle} />
+            </div>
+          </div>
+          <div className="form-field">
+            <label className="form-label" htmlFor="eq-date">Changed on</label>
+            <input id="eq-date" type="date" max={today} value={form.date} onChange={set('date')} style={eqInputStyle} />
+          </div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.45, padding: '0 4px 10px' }}>
+            {runPreview ? runPreview + '. ' : ''}Saving again for the same date replaces that day's settings.
+          </div>
+          {errMsg && (
+            <div ref={errRef} tabIndex={-1} role="alert"
+              style={{ background: 'var(--bad-tint)', color: 'var(--bad)', padding: '10px 14px', borderRadius: 10, fontSize: 12.5, fontWeight: 500, marginBottom: 10, border: '1px solid #f4cdd2' }}>
+              {errMsg}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={() => setForm(null)}>Cancel</button>
+            <button type="submit" className="btn-primary" style={{ flex: 2 }}>Save settings</button>
+          </div>
+        </form>
+      ) : (
+        <div className="metric-card" style={{ marginBottom: 10 }}>
+          {current ? (
+            <React.Fragment>
+              <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
+                <div style={{ flexShrink: 0 }}>
+                  <div className="t-label" style={{ marginBottom: 4 }}>Chlorinator</div>
+                  <div className="t-display t-num" style={{ fontSize: 28, color: 'var(--ink)', lineHeight: 1 }}>
+                    {current.chlorinatorPct}<span style={{ fontSize: 13, fontWeight: 400, marginLeft: 2, color: 'var(--muted)' }}>%</span>
+                  </div>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="t-label" style={{ marginBottom: 4 }}>Filter pump</div>
+                  <div className="t-num" style={{ fontSize: 15, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.25 }}>
+                    {timeLabel(current.filterStart)} – {timeLabel(current.filterEnd)}
+                  </div>
+                  <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 2 }}>
+                    {durationLabel(filterMinutes(current.filterStart, current.filterEnd))} a day
+                  </div>
+                </div>
+                <button type="button" className="row-del-btn" onClick={() => onDelete(current)}
+                  aria-label={'Delete settings from ' + longDate(current.ts)}>×</button>
+              </div>
+              <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 12 }}>Since {longDate(current.ts)}</div>
+              {earlier.length > 0 && (
+                <div style={{ borderTop: '1px solid var(--hairline-2)', marginTop: 14, paddingTop: 10 }}>
+                  <div className="t-label" style={{ marginBottom: 2 }}>Earlier</div>
+                  {earlier.slice(0, EQUIPMENT_EARLIER_SHOWN).map(e => (
+                    <div key={e.ts} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', minHeight: 44 }}>
+                      <div className="t-num" style={{ color: 'var(--muted)', fontSize: 11, fontFamily: 'Geist Mono, ui-monospace, monospace', flexShrink: 0, width: 78 }}>{longDate(e.ts)}</div>
+                      <div className="t-num" style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.35 }}>
+                        {e.chlorinatorPct}% · {timeLabel(e.filterStart)}–{timeLabel(e.filterEnd)} ({durationLabel(filterMinutes(e.filterStart, e.filterEnd))})
+                      </div>
+                      <button type="button" className="row-del-btn" onClick={() => onDelete(e)}
+                        aria-label={'Delete settings from ' + longDate(e.ts)}>×</button>
+                    </div>
+                  ))}
+                  {earlier.length > EQUIPMENT_EARLIER_SHOWN && (
+                    <div style={{ color: 'var(--muted)', fontSize: 11.5, paddingTop: 2 }}>
+                      {earlier.length - EQUIPMENT_EARLIER_SHOWN} older, included when you copy
+                    </div>
+                  )}
+                </div>
+              )}
+            </React.Fragment>
+          ) : (
+            <div style={{ color: 'var(--muted)', fontSize: 12.5, lineHeight: 1.5 }}>
+              Record your chlorinator level and filter run times. Each change is kept with its date, so your agent can compare the settings with your test results.
+            </div>
+          )}
+        </div>
+      )}
+
+      {!form && (
+        <div style={{ padding: '0 14px' }}>
+          <button type="button" className="btn-secondary" onClick={onCopy}>
+            <Icon name="copy" size={15} /> Copy data for agent
+          </button>
+          <div style={{ color: 'var(--muted)', fontSize: 11.5, lineHeight: 1.45, padding: '8px 4px 0', textAlign: 'center' }}>
+            Copies settings, tests, Poolwerx actions and recent activity as text to paste into your agent chat
+          </div>
+        </div>
+      )}
+    </React.Fragment>
   );
 }
 
@@ -1444,6 +1627,142 @@ function planTestImport(parsed, state, opts) {
   };
 }
 
+// ─── Equipment settings ─────────────────────────
+// Chlorinator output and filter pump run times, as a dated history (oldest
+// first, one setting per calendar day) so each water test can be read against
+// the settings that produced it: { ts (local midnight), chlorinatorPct,
+// filterStart: 'HH:MM', filterEnd: 'HH:MM' }.
+const EQUIPMENT_MAX = 60;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function validEquipment(e) {
+  return !!e && typeof e.ts === 'number' && Number.isFinite(e.ts) &&
+    typeof e.chlorinatorPct === 'number' && e.chlorinatorPct >= 0 && e.chlorinatorPct <= 100 &&
+    HHMM.test(e.filterStart || '') && HHMM.test(e.filterEnd || '') && e.filterStart !== e.filterEnd;
+}
+
+// Add a setting, replacing any already on the same calendar day, so saving
+// twice in a day corrects the entry rather than adding another.
+function upsertEquipment(history, setting) {
+  const day = dayStartTs(setting.ts);
+  const rest = (history || []).filter(e => dayStartTs(e.ts) !== day);
+  rest.push({ ...setting, ts: day });
+  rest.sort((a, b) => a.ts - b.ts);
+  return rest.slice(-EQUIPMENT_MAX);
+}
+
+// Minutes the filter runs a day. An end before the start runs past midnight.
+function filterMinutes(start, end) {
+  const toMin = (s) => +s.slice(0, 2) * 60 + +s.slice(3, 5);
+  const diff = toMin(end) - toMin(start);
+  return diff > 0 ? diff : diff + 1440;
+}
+
+const timeLabel = (s) => {
+  const h = +s.slice(0, 2);
+  return ((h % 12) || 12) + ':' + s.slice(3, 5) + ' ' + (h < 12 ? 'am' : 'pm');
+};
+const durationLabel = (min) => Math.floor(min / 60) + ' h' + (min % 60 ? ' ' + (min % 60) + ' min' : '');
+const longDate = (ts) => { const d = new Date(ts); return d.getDate() + ' ' + MONTHS_SHORT[d.getMonth()] + ' ' + d.getFullYear(); };
+
+function equipmentText(e) {
+  return 'chlorinator ' + e.chlorinatorPct + '%, filter ' + timeLabel(e.filterStart) + '–' + timeLabel(e.filterEnd) +
+    ' (' + durationLabel(filterMinutes(e.filterStart, e.filterEnd)) + ' a day)';
+}
+
+// The setting that was running when a test was taken: the latest one changed
+// before the test day. A change made on the test day itself usually came after
+// reading the results, so it is not counted for that test.
+function equipmentAt(history, ts) {
+  const day = dayStartTs(ts);
+  let found = null;
+  (history || []).forEach(e => { if (e.ts < day) found = e; });
+  return found;
+}
+
+// ─── Copy for agent ─────────────────────────────
+// Plain text for pasting into an agent chat: the equipment history, each test
+// with the settings in effect at the time, the open Poolwerx actions, routines
+// and recent activity. Pure, so it can be tested.
+const AGENT_TESTS_MAX = 12;
+const AGENT_LOG_DAYS = 90;
+
+function agentSummary(state, nowMs) {
+  const { testData, testHistory, equipmentHistory, logEntries, todos, routines } = state || {};
+  const lines = [];
+  const section = (title) => { lines.push('', title); };
+  const equipment = (equipmentHistory || []).slice().reverse();
+
+  lines.push('Pool Dashboard data, copied ' + longDate(nowMs) + '.');
+  lines.push('Compare the equipment settings with the water test results when making recommendations.');
+  if (testData && testData.pool) lines.push('Pool volume: ' + testData.pool);
+
+  section('EQUIPMENT SETTINGS (newest first)');
+  if (!equipment.length) lines.push('- Not recorded yet');
+  equipment.forEach((e, i) => {
+    lines.push('- ' + (i === 0 ? 'Current, since ' : 'From ') + longDate(e.ts) + ': ' + equipmentText(e));
+  });
+
+  section('WATER TESTS (newest first, with the settings running before each test)');
+  const tests = (testHistory || []).slice(-AGENT_TESTS_MAX).reverse();
+  if (!tests.length) lines.push('- No tests yet');
+  tests.forEach(p => {
+    const vals = METRIC_DEFS
+      .filter(d => typeof p.vals[d.id] === 'number')
+      .map(d => d.label + ' ' + p.vals[d.id] + (d.unit ? ' ' + d.unit : ''));
+    if (p.lsi != null) vals.push('LSI ' + p.lsi);
+    const eq = equipmentAt(equipmentHistory, p.ts);
+    lines.push('- ' + longDate(p.ts) + ' [' + (eq ? equipmentText(eq) : 'settings not recorded') + ']: ' + vals.join(', '));
+  });
+
+  section('TARGET RANGES');
+  lines.push(METRIC_DEFS.map(d => d.label + ' ' + d.lo + '–' + d.hi + (d.unit ? ' ' + d.unit : '')).join('; '));
+
+  const open = (todos || []).filter(t => !t.done);
+  if (testData && testData.date) {
+    section('OPEN POOLWERX ACTIONS (test of ' + testData.date + ')');
+    if (!open.length) lines.push('- None');
+    open.forEach(t => lines.push('- ' + t.label + (t.reason ? ' (' + t.reason + ')' : '')));
+  }
+
+  if ((routines || []).length) {
+    section('ROUTINES');
+    const RAPI = window.RoutinesAPI;
+    routines.forEach(r => lines.push('- ' + r.name + (RAPI ? ': ' + RAPI.recurrenceText(r) : '')));
+  }
+
+  section('ACTIVITY, LAST ' + AGENT_LOG_DAYS + ' DAYS (newest first)');
+  const since = nowMs - AGENT_LOG_DAYS * 86400000;
+  const recent = (logEntries || []).filter(e => e.ts && e.ts >= since && e.ts <= nowMs);
+  if (!recent.length) lines.push('- Nothing logged');
+  recent.forEach(e => lines.push('- ' + longDate(e.ts) + ': ' + e.type + (e.note ? ' (' + e.note + ')' : '')));
+
+  return lines.join('\n');
+}
+
+// Copy text to the clipboard. The async API needs a secure context and can be
+// refused, so there is a fallback through a hidden textarea.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* fall through to the textarea */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length); // iOS ignores select() alone
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  document.body.removeChild(ta);
+  return ok;
+}
+
 // The robot was branded "Aiper Scuba" in older data; everything now says "Pool cleaner".
 const renamePoolCleaner = (s) => (s || '')
   .replace(/run\s+aiper(\s+scuba)?/gi, 'Run pool cleaner')
@@ -1479,6 +1798,12 @@ function migrateData(data) {
       .filter(p => p && typeof p.ts === 'number' && p.vals && typeof p.vals === 'object')
       .sort((a, b) => a.ts - b.ts)
       .slice(-HISTORY_MAX);
+  }
+  // Left absent when missing, so importing an older backup keeps the settings.
+  if (Array.isArray(out.equipmentHistory)) {
+    out.equipmentHistory = out.equipmentHistory
+      .filter(validEquipment)
+      .reduce(upsertEquipment, []);
   }
   if ((out.rev || 0) < 1) {
     if (Array.isArray(out.routines) && !out.routines.some(r => r.match && r.match.logType === 'watertest')) {
@@ -1519,6 +1844,7 @@ function App() {
   const [uploading, setUploading] = React.useState(false);
   const [logEntries, setLogEntries] = React.useState((persisted && persisted.logEntries) || []);
   const [testHistory, setTestHistory] = React.useState((persisted && persisted.testHistory) || []);
+  const [equipmentHistory, setEquipmentHistory] = React.useState((persisted && persisted.equipmentHistory) || []);
   // Routines: seed defaults on first load (persisted may exist without routines field from v3).
   // Rules missing createdTs (pre-v4.1 data) are anchored to now so they don't show as overdue.
   const [routines, setRoutines] = React.useState(() => {
@@ -1544,10 +1870,10 @@ function App() {
   React.useEffect(() => {
     try {
       localStorage.setItem(LS_KEY, JSON.stringify({
-        rev: STATE_REV, todos, testData, logEntries, testHistory, phHistory: phHistoryFrom(testHistory), routines, lastRemoteReportId,
+        rev: STATE_REV, todos, testData, logEntries, testHistory, phHistory: phHistoryFrom(testHistory), routines, lastRemoteReportId, equipmentHistory,
       }));
     } catch (e) { /* quota / private mode */ }
-  }, [todos, testData, logEntries, testHistory, routines, lastRemoteReportId]);
+  }, [todos, testData, logEntries, testHistory, routines, lastRemoteReportId, equipmentHistory]);
 
   React.useEffect(() => {
     const st = window.history.state;
@@ -1772,6 +2098,26 @@ function App() {
     showToast('Routine removed');
   };
 
+  const onSaveEquipment = (setting) => {
+    setEquipmentHistory(prev => upsertEquipment(prev, setting));
+    showToast('✓ Equipment settings saved');
+  };
+  const onDeleteEquipment = (entry) => {
+    setEquipmentHistory(prev => prev.filter(e => e !== entry));
+    showToast('Settings removed', {
+      actionLabel: 'Undo',
+      onAction: () => {
+        setEquipmentHistory(prev => prev.includes(entry) ? prev : upsertEquipment(prev, entry));
+        setToast('');
+      },
+    });
+  };
+  const onCopyForAgent = async () => {
+    const text = agentSummary({ testData, testHistory, equipmentHistory, logEntries, todos, routines }, Date.now());
+    const ok = await copyText(text);
+    showToast(ok ? '✓ Copied — paste it into your agent chat' : "Couldn't copy on this browser");
+  };
+
   const applyTestPlan = (plan, remoteId) => {
     if (!plan || !plan.applied) return;
     setTestData(plan.testData);
@@ -1942,7 +2288,7 @@ function App() {
 
   const onExport = () => {
     try {
-      downloadBackup({ rev: STATE_REV, todos, testData, logEntries, testHistory, phHistory: phHistoryFrom(testHistory), routines, lastRemoteReportId });
+      downloadBackup({ rev: STATE_REV, todos, testData, logEntries, testHistory, phHistory: phHistoryFrom(testHistory), routines, lastRemoteReportId, equipmentHistory });
       showToast('✓ Backup downloaded');
     } catch (err) {
       console.error(err);
@@ -1964,6 +2310,7 @@ function App() {
         if (data.testData && Array.isArray(data.testData.metrics)) setTestData(data.testData);
         if (Array.isArray(data.logEntries)) setLogEntries(data.logEntries);
         if (Array.isArray(data.testHistory)) setTestHistory(data.testHistory);
+        if (Array.isArray(data.equipmentHistory)) setEquipmentHistory(data.equipmentHistory);
         if (Array.isArray(data.routines)) setRoutines(data.routines.map(r => r.createdTs ? r : { ...r, createdTs: Date.now() }));
         if (Object.prototype.hasOwnProperty.call(data, 'lastRemoteReportId')) {
           const id = data.lastRemoteReportId;
@@ -1981,7 +2328,8 @@ function App() {
 
   const screens = {
     dashboard: <Dashboard onNav={navigate} todos={todos} onToggle={onToggle} onDelete={onDelete} toast={toast} testData={testData} onUpload={triggerUpload} uploading={uploading} testHistory={testHistory} routines={routines} logEntries={logEntries} onRoutineDone={onRoutineDone} />,
-    chemistry: <Chemistry onNav={navigate} testData={testData} onReupload={triggerUpload} testHistory={testHistory} />,
+    chemistry: <Chemistry onNav={navigate} testData={testData} onReupload={triggerUpload} testHistory={testHistory}
+      equipment={<EquipmentSection history={equipmentHistory} onSave={onSaveEquipment} onDelete={onDeleteEquipment} onCopy={onCopyForAgent} />} />,
     log: <Log onNav={navigate} todos={todos} onToggle={onToggle} testData={testData} onLogEntry={onLogEntry} />,
     routines: window.RoutinesScreen ? <window.RoutinesScreen rules={routines} entries={logEntries} onAdd={() => openEditor({})} onEdit={openEditor} onDelete={onDeleteRoutine} banner={<ReminderToggle />} /> : null,
     history: <History onNav={navigate} entries={logEntries} onExport={onExport} onImport={onImport} onDeleteEntry={onDeleteEntry} />,
