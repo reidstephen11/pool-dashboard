@@ -7,6 +7,24 @@ recurring maintenance (routines), and keeps a full activity history.
 
 **Live app:** https://reidstephen11.github.io/pool-dashboard/
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="docs/screenshots/home.png" width="250" alt="Home screen: last test date, count of things needing attention, pH trend over the last six tests, and the action list with due routines and Poolwerx recommendations"><br><b>Home</b><br>What needs doing, and the pH trend</td>
+    <td align="center" valign="top" width="33%"><img src="docs/screenshots/chemistry.png" width="250" alt="Chemistry screen: each reading against its target range, with a trend chart per metric"><br><b>Chemistry</b><br>Every reading against its target, with trends</td>
+    <td align="center" valign="top" width="33%"><img src="docs/screenshots/routines.png" width="250" alt="Routines screen: reminders toggle and recurring tasks such as running the pool cleaner, water tests, weekly acid and backwashing"><br><b>Routines</b><br>Recurring tasks and reminders</td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><img src="docs/screenshots/log.png" width="250" alt="Log screen: choose chemical, backwash, pool cleaner, water test or note, then record amount and time; Poolwerx doses can be marked done"><br><b>Log</b><br>Record doses and maintenance</td>
+    <td align="center" valign="top"><img src="docs/screenshots/history.png" width="250" alt="History screen: activity log grouped by month, with export and import"><br><b>History</b><br>Everything logged, with backup export</td>
+    <td></td>
+  </tr>
+</table>
+
+Taken from the built app at phone size (390 × 844). The latest test is the
+published 4 Sep 2026 report; the earlier tests and log entries are sample data.
+
 ## Source layout
 
 | File | Purpose |
@@ -20,6 +38,7 @@ recurring maintenance (routines), and keeps a full activity history.
 | `sync-report.js` | Remote water-test slot: fetch URL, JSON schema check, and the map onto the PDF parser's result shape. Plain JS (page and service worker) |
 | `sw.js` | Service worker — offline cache (see below) + background routine checks (Periodic Background Sync) + notification clicks |
 | `manifest.webmanifest` · `icons/` | PWA manifest and app/notification icons (makes the app installable) |
+| `docs/screenshots/` | Screenshots used in this README (not deployed) |
 | `build.js` | Writes `_site/`, the deployed copy: JSX compiled ahead of time into one `app.js`, `index.html` without Babel, `sw.js` precaching the built files (see **Build and deploy**) |
 | `sync-report.test.js` · `app.test.js` | Tests (`npm test`): the sync format and the published sync file; routine dates, log order, trend history |
 | `.github/workflows/pages.yml` | Runs the tests and the build on every push and pull request, and deploys to Pages |
