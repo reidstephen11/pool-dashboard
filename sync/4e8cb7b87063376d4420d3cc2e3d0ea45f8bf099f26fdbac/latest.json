@@ -1,33 +1,41 @@
 {
   "schema": 1,
-  "reportId": "6457546",
-  "testedAt": "2026-09-04",
+  "reportId": "6499528",
+  "testedAt": "2026-09-28",
   "source": "poolwerx-email",
-  "publishedAt": "2026-09-23T03:48:04.531Z",
+  "publishedAt": "2026-09-28T00:45:07.675Z",
   "metrics": {
-    "ph": 7.2,
-    "freeCl": 4.43,
+    "ph": 7.7,
+    "freeCl": 5.62,
     "combCl": 0,
-    "salt": 3750,
-    "alk": 99.67,
-    "caHard": 229,
-    "cya": 25,
-    "phos": 2.498,
-    "lsi": -0.56,
+    "salt": 3850,
+    "alk": 88,
+    "caHard": 224,
+    "cya": 27,
+    "phos": 1.48,
+    "lsi": -0.12,
     "pool": 40000
   },
   "recs": [
+    {
+      "param": "PH",
+      "action": "Add 200 mls of Hydrochloric Acid"
+    },
+    {
+      "param": "FREE CHLORINE",
+      "action": "Add 100 g of Vitalyse Chlorine Remover"
+    },
     {
       "param": "TOTAL CHLORINE",
       "action": "Reduce your chlorinator hours/level"
     },
     {
       "param": "CYANURIC ACID",
-      "action": "Add 600 g of Vitalyse Sunblock"
+      "action": "Add 500 g of Vitalyse Sunblock"
     },
     {
       "param": "PHOSPHATES",
-      "action": "Add 800 mls of Vitalyse Phosphate Remover"
+      "action": "Add 600 mls of Vitalyse Phosphate Remover"
     }
   ]
 }
