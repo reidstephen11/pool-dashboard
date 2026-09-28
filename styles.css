@@ -426,6 +426,26 @@ body {
   transform: none;
 }
 
+/* ── Secondary button (Copy for agent, Cancel) ── */
+.btn-secondary {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 13px 15px;
+  min-height: 44px;
+  font-family: 'Geist', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  width: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.18s;
+}
+.btn-secondary:hover  { border-color: #c7d6dc; }
+.btn-secondary:active { transform: scale(0.98); }
+
 /* ── Header chip button (re-upload, export) ── */
 .chip-btn {
   background: rgba(255,255,255,0.07);
