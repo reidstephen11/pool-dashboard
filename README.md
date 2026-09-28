@@ -12,7 +12,7 @@ recurring maintenance (routines), and keeps a full activity history.
 | File | Purpose |
 |---|---|
 | `index.html` | Entry point — loads React 18 + Babel standalone from CDN, fonts from Google Fonts, the notify scripts, then the two JSX files. Shows "Loading…" until the app renders, and a Reload prompt if it never does |
-| `app.jsx` | Main app: PDF parser, Dashboard / Chemistry / Log / History screens, state + localStorage persistence |
+| `app.jsx` | Main app: PDF parser, Dashboard / Chemistry / Log / History screens, equipment settings and Copy for agent, state + localStorage persistence |
 | `routines.jsx` | Recurring-rule engine, Routines screen, routine editor, and the shared stroke-icon set (`window.Icon`) — must load **before** `app.jsx` |
 | `styles.css` | Design tokens and all component CSS |
 | `notify-core.js` | Reminder logic shared by the page and the service worker: IndexedDB store, "what's due" diff, `showNotification`. Plain JS (runs in both contexts) |
@@ -21,7 +21,7 @@ recurring maintenance (routines), and keeps a full activity history.
 | `sw.js` | Service worker — offline cache (see below) + background routine checks (Periodic Background Sync) + notification clicks |
 | `manifest.webmanifest` · `icons/` | PWA manifest and app/notification icons (makes the app installable) |
 | `build.js` | Writes `_site/`, the deployed copy: JSX compiled ahead of time into one `app.js`, `index.html` without Babel, `sw.js` precaching the built files (see **Build and deploy**) |
-| `sync-report.test.js` · `app.test.js` | Tests (`npm test`): the sync format and the published sync file; routine dates, log order, trend history |
+| `sync-report.test.js` · `app.test.js` | Tests (`npm test`): the sync format and the published sync file; routine dates, log order, trend history, equipment settings, the agent summary |
 | `.github/workflows/pages.yml` | Runs the tests and the build on every push and pull request, and deploys to Pages |
 
 Locally there is still no build step. Babel standalone compiles the JSX in the
@@ -73,8 +73,9 @@ these tokens — no new hex colors, no drop shadows, no emoji.
 ## Data & persistence
 
 All state persists to `localStorage` under the key `poolDashboard_v2`
-(`todos`, `testData`, `logEntries`, `testHistory`, `routines`, and
-`lastRemoteReportId` once a remote report has been applied). History →
+(`todos`, `testData`, `logEntries`, `testHistory`, `routines`,
+`equipmentHistory`, and `lastRemoteReportId` once a remote report has been
+applied). History →
 Export/Import moves data between browsers or devices as a JSON backup file.
 
 `testHistory` holds every reading of each test (one point per test day, oldest
@@ -98,6 +99,30 @@ emoji `icon` fields still render and match routines. Uploading a test PDF also
 logs a `watertest` entry (from the report's own date), which resets the
 seeded "Get water tested" routine — its frequency is editable like any other
 routine's.
+
+## Equipment settings and Copy for agent
+
+The Chemistry screen has an **Equipment** section for the chlorinator output (%)
+and the filter pump's start and stop times, with the date they were changed.
+Each change is kept in `equipmentHistory` (oldest first, one entry per calendar
+day, so saving twice on the same date corrects it):
+
+```json
+{ "ts": 1790467200000, "chlorinatorPct": 40, "filterStart": "09:00", "filterEnd": "15:00" }
+```
+
+`ts` is local midnight of the change date. Times are 24-hour `HH:MM`; a stop
+time earlier than the start runs past midnight (22:00–04:30 is 6 h 30 min).
+Saved and imported lists are cleaned on load, and a backup without the field
+leaves the current settings alone.
+
+**Copy data for agent** puts a plain-text summary on the clipboard to paste into
+an agent chat: the settings history, the last 12 tests (each with the settings
+that were running before it), target ranges, open Poolwerx actions, routines,
+and the last 90 days of activity. A setting changed on a test's own day is not
+counted for that test, because a change made that day usually came after the
+results. The text is built by `agentSummary()` in `app.jsx`, which the tests
+cover.
 
 ## Reminders (push notifications)
 
