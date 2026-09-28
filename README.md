@@ -12,7 +12,7 @@ recurring maintenance (routines), and keeps a full activity history.
 <table>
   <tr>
     <td align="center" valign="top" width="33%"><img src="docs/screenshots/home.png" width="250" alt="Home screen: last test date, count of things needing attention, pH trend over the last six tests, and the action list with due routines and Poolwerx recommendations"><br><b>Home</b><br>What needs doing, and the pH trend</td>
-    <td align="center" valign="top" width="33%"><img src="docs/screenshots/chemistry.png" width="250" alt="Chemistry screen: each reading against its target range, with a trend chart per metric"><br><b>Chemistry</b><br>Every reading against its target, with trends</td>
+    <td align="center" valign="top" width="33%"><img src="docs/screenshots/chemistry.png" width="250" alt="Chemistry screen: equipment settings (chlorinator output and filter pump times) with Copy data for agent, then each reading against its target range with a trend chart"><br><b>Chemistry</b><br>Equipment settings, and every reading against its target</td>
     <td align="center" valign="top" width="33%"><img src="docs/screenshots/routines.png" width="250" alt="Routines screen: reminders toggle and recurring tasks such as running the pool cleaner, water tests, weekly acid and backwashing"><br><b>Routines</b><br>Recurring tasks and reminders</td>
   </tr>
   <tr>
@@ -22,8 +22,9 @@ recurring maintenance (routines), and keeps a full activity history.
   </tr>
 </table>
 
-Taken from the built app at phone size (390 × 844). The latest test is the
-published 4 Sep 2026 report; the earlier tests and log entries are sample data.
+Taken from the built app (v2.8) at phone size (390 × 844). The latest test is
+the published 4 Sep 2026 report; the earlier tests, log entries and equipment
+settings are sample data.
 
 ## Source layout
 
