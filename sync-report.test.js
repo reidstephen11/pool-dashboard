@@ -124,8 +124,10 @@ assert.strictEqual(S.url(), 'https://reidstephen11.github.io/pool-dashboard/' + 
 assert.ok(S.fetchReport.toString().includes('no-store'));
 
 const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+const technical = fs.readFileSync(path.join(__dirname, 'docs', 'TECHNICAL.md'), 'utf8');
 assert.ok(!readme.includes('4e8cb7b87063376d4420d3cc2e3d0ea45f8bf099f26fdbac'), 'README must not advertise the sync token');
-assert.ok(readme.includes('Remote sync'));
+assert.ok(!technical.includes('4e8cb7b87063376d4420d3cc2e3d0ea45f8bf099f26fdbac'), 'docs/TECHNICAL.md must not advertise the sync token');
+assert.ok(technical.includes('Remote sync'));
 
 // The file the email automation publishes. It is either still the placeholder
 // or a real report — never something the app would reject — and it must not

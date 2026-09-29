@@ -27,7 +27,7 @@ const BUNDLE = 'app.js';
 
 // Development-only files that are not deployed.
 const SKIP = new Set(['.git', '.github', '.gitignore', 'node_modules', '_site', 'build.js',
-  'package.json', 'package-lock.json', 'README.md']);
+  'package.json', 'package-lock.json', 'README.md', 'docs']);
 const skip = (name) => SKIP.has(name) || /\.test\.js$/.test(name);
 
 // Same presets as Babel in the browser (react + env), with modern targets so
