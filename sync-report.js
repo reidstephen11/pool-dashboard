@@ -3,7 +3,7 @@
 //
 // The app fetches this path relative to its own origin (GitHub Pages project
 // subpath included). Do not point it at another host. The long directory name
-// is the sync slot; it is intentionally not repeated in the README.
+// is the sync slot; it is intentionally not repeated in the README or docs/.
 //
 // latest.json schema (version 1) — chemistry, report date, recommendations only.
 // Never put a customer name, street address, email, or phone in this file.
