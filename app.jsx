@@ -3,6 +3,7 @@
 const Icon = window.Icon;
 const KIND_ICON = window.RoutinesAPI.KIND_ICON;
 const entryKind = window.RoutinesAPI.entryKind;
+const CHEMICALS = window.RoutinesAPI.CHEMICALS;
 const dayStartTs = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
 // User-facing app version, shown on the Home hero so a phone can confirm it
@@ -1028,6 +1029,7 @@ function fromLocalInput(s) {
 function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
   testData = testData || TEST;
   const [chemical, setChemical] = React.useState('Hydrochloric Acid');
+  const [otherName, setOtherName] = React.useState(''); // typed name when 'Other' is picked
   const [amount, setAmount] = React.useState('500');
   const [unit, setUnit] = React.useState('mL');
   const [notes, setNotes] = React.useState('');
@@ -1036,7 +1038,6 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
   const [errMsg, setErrMsg] = React.useState('');
   const errRef = React.useRef(null);
 
-  const chemicals = ['Hydrochloric Acid', 'Non Chlorine Shock', 'Calcium Up', 'Sunblock', 'Algaecide', 'Clarifier', 'Chlorine', 'Other'];
   const units = ['mL', 'L', 'g', 'kg', 'tabs'];
   const pending = todos.filter(t => !t.done);
 
@@ -1065,6 +1066,11 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
       failWith('Enter an amount greater than 0');
       return;
     }
+    const chemicalName = chemical === 'Other' ? otherName.trim() : chemical;
+    if (logType === 'chemical' && !chemicalName) {
+      failWith('Enter the chemical name');
+      return;
+    }
     if (logType === 'note' && !notes.trim()) {
       failWith('Add a note before saving');
       return;
@@ -1072,7 +1078,7 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
     setSaved(true);
     if (onLogEntry) {
       onLogEntry({
-        type: logType === 'chemical' ? `Added ${amount} ${unit} ${chemical}`
+        type: logType === 'chemical' ? `Added ${amount} ${unit} ${chemicalName}`
           : logType === 'backwash' ? 'Backwash'
           : logType === 'aiper' ? 'Pool cleaner run'
           : logType === 'watertest' ? 'Water test'
@@ -1084,7 +1090,7 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
     }
     // Reset form
     setNotes('');
-    if (logType === 'chemical') setAmount('');
+    if (logType === 'chemical') { setAmount(''); setOtherName(''); }
     setPickedTime(null);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -1132,9 +1138,16 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
         <div className="form-field">
           <label className="form-label" htmlFor="log-chemical">Chemical</label>
           <select id="log-chemical" className="form-native-select" value={chemical} onChange={e => setChemical(e.target.value)}>
-            {chemicals.map(c => <option key={c} value={c}>{c}</option>)}
+            {CHEMICALS.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
+        {chemical === 'Other' && (
+          <div className="form-field">
+            <label className="form-label" htmlFor="log-chemical-name">Chemical name</label>
+            <input id="log-chemical-name" value={otherName} onChange={e => setOtherName(e.target.value)} placeholder="e.g. Stain remover"
+              style={{ fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 16, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' }} />
+          </div>
+        )}
 
         {/* Amount + Unit */}
         <div style={{ display: 'flex', gap: 10 }}>
