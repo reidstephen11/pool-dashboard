@@ -10,7 +10,7 @@ const dayStartTs = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); ret
 // picked up the latest deploy. Bump this when shipping a change you want to
 // be able to check on-device. Separate from the backup-file `version` field
 // and from STATE_REV (those are data-format revisions).
-const APP_VERSION = '2.8';
+const APP_VERSION = '2.9';
 
 // Normalize dose text from the Poolwerx PDF: consistent units ("mls" → "mL").
 // Both rules are case-insensitive: the report is not consistent about unit case,
@@ -533,7 +533,7 @@ function TodoCard({ t, idx, onToggle, onDelete }) {
 }
 
 // ─── Dashboard Screen ────────────────────────────
-function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload, uploading, testHistory, routines, logEntries, onRoutineDone }) {
+function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload, uploading, testHistory, routines, logEntries, onRoutineDone, equipment }) {
   testData = testData || TEST;
   const hasTest = !!testData.date;
   // Looked up by id, not by array position. Persisted or imported test data can
@@ -647,6 +647,8 @@ function Dashboard({ onNav, todos, onToggle, onDelete, toast, testData, onUpload
             onClick={() => onNav('chemistry')}>{p.label}</button>
         )) : <div style={{ color: 'var(--muted)', fontSize: 12, padding: '4px 4px' }}>Results will appear here after upload</div>}
       </div>
+
+      {equipment}
 
       {/* pH Trend */}
       <div className="sec-head">
@@ -811,9 +813,11 @@ function Chemistry({ onNav, testData, onReupload, testHistory, equipment }) {
   );
 }
 
-// ─── Equipment section (Chemistry screen) ────────
-// Chlorinator level and filter run times, with the date they were changed, and
-// the Copy for agent button. Shown whether or not a test has been loaded.
+// ─── Equipment section (Home and Chemistry screens) ─
+// Chlorinator level and filter run times, with the date they were changed.
+// Home shows the compact version: the current settings and a Change button.
+// Chemistry shows the full version with earlier settings, which can be deleted.
+// Both are shown whether or not a test has been loaded.
 const EQUIPMENT_EARLIER_SHOWN = 5;
 const eqInputStyle = { fontFamily: 'Geist, ui-sans-serif, system-ui, sans-serif', fontSize: 16, color: 'var(--ink)', border: 'none', background: 'none', outline: 'none', width: '100%' };
 function fromDateInput(s) {
@@ -823,7 +827,7 @@ function fromDateInput(s) {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-function EquipmentSection({ history, onSave, onDelete, onCopy }) {
+function EquipmentSection({ history, onSave, onDelete, compact, onShowHistory }) {
   const list = history || [];
   const current = list.length ? list[list.length - 1] : null;
   const earlier = list.slice(0, -1).reverse();
@@ -881,7 +885,10 @@ function EquipmentSection({ history, onSave, onDelete, onCopy }) {
     <React.Fragment>
       <div className="sec-head">
         <span id="equipment-head">Equipment</span>
-        {!form && (
+        {!form && compact && current && onShowHistory && (
+          <button type="button" className="link-btn" onClick={onShowHistory}>History →</button>
+        )}
+        {!form && !compact && (
           <button type="button" ref={editBtnRef} className="link-btn" onClick={startEdit}
             aria-label={current ? 'Change equipment settings' : 'Set equipment settings'}>
             {current ? 'Change' : 'Set up'}
@@ -924,6 +931,37 @@ function EquipmentSection({ history, onSave, onDelete, onCopy }) {
             <button type="submit" className="btn-primary" style={{ flex: 2 }}>Save settings</button>
           </div>
         </form>
+      ) : compact ? (
+        <div className="metric-card" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {current ? (
+            <React.Fragment>
+              <div style={{ flexShrink: 0 }}>
+                <div className="t-label" style={{ marginBottom: 4 }}>Chlorinator</div>
+                <div className="t-display t-num" style={{ fontSize: 24, color: 'var(--ink)', lineHeight: 1 }}>
+                  {current.chlorinatorPct}<span style={{ fontSize: 13, fontWeight: 400, marginLeft: 2, color: 'var(--muted)' }}>%</span>
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="t-label" style={{ marginBottom: 4 }}>Filter pump</div>
+                <div className="t-num" style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.25 }}>
+                  {timeLabel(current.filterStart)} – {timeLabel(current.filterEnd)}
+                </div>
+                <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 2 }}>
+                  {durationLabel(filterMinutes(current.filterStart, current.filterEnd))} a day
+                </div>
+              </div>
+            </React.Fragment>
+          ) : (
+            <div style={{ flex: 1, minWidth: 0, color: 'var(--muted)', fontSize: 12.5, lineHeight: 1.5 }}>
+              Record your chlorinator level and filter run times.
+            </div>
+          )}
+          <button type="button" ref={editBtnRef} className="btn-secondary" onClick={startEdit}
+            style={{ width: 'auto', flexShrink: 0, padding: '8px 16px', fontSize: 13 }}
+            aria-label={current ? 'Change equipment settings' : 'Set equipment settings'}>
+            {current ? 'Change' : 'Set up'}
+          </button>
+        </div>
       ) : (
         <div className="metric-card" style={{ marginBottom: 10 }}>
           {current ? (
@@ -977,16 +1015,6 @@ function EquipmentSection({ history, onSave, onDelete, onCopy }) {
         </div>
       )}
 
-      {!form && (
-        <div style={{ padding: '0 14px' }}>
-          <button type="button" className="btn-secondary" onClick={onCopy}>
-            <Icon name="copy" size={15} /> Copy data for agent
-          </button>
-          <div style={{ color: 'var(--muted)', fontSize: 11.5, lineHeight: 1.45, padding: '8px 4px 0', textAlign: 'center' }}>
-            Copies settings, tests, Poolwerx actions and recent activity as text to paste into your agent chat
-          </div>
-        </div>
-      )}
     </React.Fragment>
   );
 }
@@ -1247,7 +1275,7 @@ function Log({ onNav, todos, onToggle, testData, onLogEntry }) {
 }
 
 // ─── History Screen ──────────────────────────────
-function History({ onNav, entries: userEntries, onExport, onImport, onDeleteEntry }) {
+function History({ onNav, entries: userEntries, onExport, onImport, onDeleteEntry, onCopy }) {
   const entries = userEntries || [];
   const fileRef = React.useRef(null);
   const handlePick = (e) => {
@@ -1261,19 +1289,22 @@ function History({ onNav, entries: userEntries, onExport, onImport, onDeleteEntr
       <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handlePick} />
       <div className="hero">
         <div style={{ position: 'relative', zIndex: 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ minWidth: 0 }}>
-              <div className="t-label" style={{ color: 'var(--hero-dim)', marginBottom: 8 }}>History</div>
-              <h1 className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15, fontWeight: 600 }}>Activity log</h1>
-              <div style={{ color: 'var(--hero-dim)', fontSize: 12.5, marginTop: 6 }}>Doses, runs, observations</div>
-            </div>
-            {/* Import replaces everything, so it says so — it used to sit 6px from
-                Export as an identical 26px chip. */}
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <button type="button" onClick={onExport} className="chip-btn" aria-label="Export a backup of all data">↓ Export</button>
-              <button type="button" onClick={() => fileRef.current && fileRef.current.click()} className="chip-btn"
-                aria-label="Import a backup — this replaces all current data">↑ Import</button>
-            </div>
+          <div className="t-label" style={{ color: 'var(--hero-dim)', marginBottom: 8 }}>History</div>
+          <h1 className="t-display" style={{ color: 'var(--hero-fg)', fontSize: 24, lineHeight: 1.15, fontWeight: 600 }}>Activity log</h1>
+          <div style={{ color: 'var(--hero-dim)', fontSize: 12.5, marginTop: 6 }}>Doses, runs, observations</div>
+          {/* Import replaces everything, so it says so — it used to sit 6px from
+              Export as an identical 26px chip. The data tools sit in a row under
+              the title so three chips fit on a phone. */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+            <button type="button" onClick={onExport} className="chip-btn" aria-label="Export a backup of all data">↓ Export</button>
+            <button type="button" onClick={() => fileRef.current && fileRef.current.click()} className="chip-btn"
+              aria-label="Import a backup — this replaces all current data">↑ Import</button>
+            {onCopy && (
+              <button type="button" onClick={onCopy} className="chip-btn"
+                aria-label="Copy data for your agent chat" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <Icon name="copy" size={12} /> Copy for agent
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1314,7 +1345,7 @@ function History({ onNav, entries: userEntries, onExport, onImport, onDeleteEntr
         </React.Fragment>
         )}
         <div style={{ color: 'var(--muted)', fontSize: 11, lineHeight: 1.5, padding: '4px 4px 0', textAlign: 'center' }}>
-          Export backs up all data as a file · Import replaces current data
+          Export backs up all data as a file · Import replaces current data · Copy for agent copies settings, tests, Poolwerx actions and recent activity as text to paste into your agent chat
         </div>
       </div>
     </div>
@@ -2340,12 +2371,13 @@ function App() {
   };
 
   const screens = {
-    dashboard: <Dashboard onNav={navigate} todos={todos} onToggle={onToggle} onDelete={onDelete} toast={toast} testData={testData} onUpload={triggerUpload} uploading={uploading} testHistory={testHistory} routines={routines} logEntries={logEntries} onRoutineDone={onRoutineDone} />,
+    dashboard: <Dashboard onNav={navigate} todos={todos} onToggle={onToggle} onDelete={onDelete} toast={toast} testData={testData} onUpload={triggerUpload} uploading={uploading} testHistory={testHistory} routines={routines} logEntries={logEntries} onRoutineDone={onRoutineDone}
+      equipment={<EquipmentSection compact history={equipmentHistory} onSave={onSaveEquipment} onShowHistory={() => navigate('chemistry')} />} />,
     chemistry: <Chemistry onNav={navigate} testData={testData} onReupload={triggerUpload} testHistory={testHistory}
-      equipment={<EquipmentSection history={equipmentHistory} onSave={onSaveEquipment} onDelete={onDeleteEquipment} onCopy={onCopyForAgent} />} />,
+      equipment={<EquipmentSection history={equipmentHistory} onSave={onSaveEquipment} onDelete={onDeleteEquipment} />} />,
     log: <Log onNav={navigate} todos={todos} onToggle={onToggle} testData={testData} onLogEntry={onLogEntry} />,
     routines: window.RoutinesScreen ? <window.RoutinesScreen rules={routines} entries={logEntries} onAdd={() => openEditor({})} onEdit={openEditor} onDelete={onDeleteRoutine} banner={<ReminderToggle />} /> : null,
-    history: <History onNav={navigate} entries={logEntries} onExport={onExport} onImport={onImport} onDeleteEntry={onDeleteEntry} />,
+    history: <History onNav={navigate} entries={logEntries} onExport={onExport} onImport={onImport} onDeleteEntry={onDeleteEntry} onCopy={onCopyForAgent} />,
   };
 
   const navItems = [
