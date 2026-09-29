@@ -32,6 +32,10 @@ function Icon({ name, size = 20, strokeWidth = 1.5, style }) {
 // entries and routine matchers keep working; all user-facing text says "Pool cleaner".
 const KIND_ICON = { chemical: 'flask', backwash: 'droplet', aiper: 'bot', watertest: 'vial', note: 'pencil' };
 
+// Chemicals offered on the Log screen and in the routine editor. 'Other' lets
+// the Log screen take a typed-in name.
+const CHEMICALS = ['Hydrochloric Acid', 'Non Chlorine Shock', 'Calcium Up', 'Sunblock', 'Algaecide', 'Clarifier', 'Chlorine', 'Phosphate Remover', 'Other'];
+
 // Resolve an entry's kind; falls back to legacy emoji/type for old persisted data.
 function entryKind(entry) {
   if (!entry) return 'note';
@@ -376,8 +380,6 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
   const [days, setDays]         = React.useState(initial?.schedule?.days || [6]);
   const [interval, setInt]      = React.useState(initial?.schedule?.intervalDays || 7);
 
-  const chemicals = ['Hydrochloric Acid', 'Non Chlorine Shock', 'Calcium Up', 'Sunblock', 'Algaecide', 'Clarifier', 'Chlorine', 'Other'];
-
   const toggleDay = (d) => {
     setDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d].sort());
   };
@@ -483,7 +485,7 @@ function RoutineEditor({ initial, onSave, onCancel, onDelete }) {
             <div className="form-field">
               <label className="form-label" htmlFor="routine-chemical">Chemical</label>
               <select id="routine-chemical" className="form-native-select" value={chemical} onChange={e => setChemical(e.target.value)}>
-                {chemicals.map(c => <option key={c} value={c}>{c}</option>)}
+                {CHEMICALS.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           )}
@@ -595,7 +597,7 @@ window.RoutinesAPI = {
   SEED_ROUTINES, seedRoutines, DOW_LABELS, DOW_SHORT, DOW_INITIAL,
   matchesRule, lastMatchTs, nextDueTs, ruleStatus, nextMatchingDay, prevMatchingDay,
   recurrenceText, dueText, lastDoneText, shortDueChipText, routineToTodo, dayDiff, dayStart, addDays,
-  entryKind, ruleKind, KIND_ICON,
+  entryKind, ruleKind, KIND_ICON, CHEMICALS,
 };
 window.RoutinesScreen = RoutinesScreen;
 window.RoutineEditor  = RoutineEditor;
