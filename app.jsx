@@ -10,7 +10,7 @@ const dayStartTs = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); ret
 // picked up the latest deploy. Bump this when shipping a change you want to
 // be able to check on-device. Separate from the backup-file `version` field
 // and from STATE_REV (those are data-format revisions).
-const APP_VERSION = '2.9';
+const APP_VERSION = '2.10';
 
 // Normalize dose text from the Poolwerx PDF: consistent units ("mls" → "mL").
 // Both rules are case-insensitive: the report is not consistent about unit case,
@@ -827,7 +827,7 @@ function fromDateInput(s) {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-function EquipmentSection({ history, onSave, onDelete, compact, onShowHistory }) {
+function EquipmentSection({ history, onSave, onDelete, compact }) {
   const list = history || [];
   const current = list.length ? list[list.length - 1] : null;
   const earlier = list.slice(0, -1).reverse();
@@ -885,9 +885,6 @@ function EquipmentSection({ history, onSave, onDelete, compact, onShowHistory })
     <React.Fragment>
       <div className="sec-head">
         <span id="equipment-head">Equipment</span>
-        {!form && compact && current && onShowHistory && (
-          <button type="button" className="link-btn" onClick={onShowHistory}>History →</button>
-        )}
         {!form && !compact && (
           <button type="button" ref={editBtnRef} className="link-btn" onClick={startEdit}
             aria-label={current ? 'Change equipment settings' : 'Set equipment settings'}>
@@ -2372,7 +2369,7 @@ function App() {
 
   const screens = {
     dashboard: <Dashboard onNav={navigate} todos={todos} onToggle={onToggle} onDelete={onDelete} toast={toast} testData={testData} onUpload={triggerUpload} uploading={uploading} testHistory={testHistory} routines={routines} logEntries={logEntries} onRoutineDone={onRoutineDone}
-      equipment={<EquipmentSection compact history={equipmentHistory} onSave={onSaveEquipment} onShowHistory={() => navigate('chemistry')} />} />,
+      equipment={<EquipmentSection compact history={equipmentHistory} onSave={onSaveEquipment} />} />,
     chemistry: <Chemistry onNav={navigate} testData={testData} onReupload={triggerUpload} testHistory={testHistory}
       equipment={<EquipmentSection history={equipmentHistory} onSave={onSaveEquipment} onDelete={onDeleteEquipment} />} />,
     log: <Log onNav={navigate} todos={todos} onToggle={onToggle} testData={testData} onLogEntry={onLogEntry} />,
