@@ -1,41 +1,53 @@
 {
   "schema": 1,
-  "reportId": "6499528",
-  "testedAt": "2026-09-28",
+  "reportId": "6549135",
+  "testedAt": "2026-10-24",
   "source": "poolwerx-email",
-  "publishedAt": "2026-09-28T00:45:07.675Z",
+  "publishedAt": "2026-10-24T00:45:16.015Z",
   "metrics": {
-    "ph": 7.7,
-    "freeCl": 5.62,
-    "combCl": 0,
-    "salt": 3850,
-    "alk": 88,
-    "caHard": 224,
-    "cya": 27,
-    "phos": 1.48,
-    "lsi": -0.12,
+    "ph": 6.8,
+    "freeCl": 3.63,
+    "combCl": 0.81,
+    "salt": 3000,
+    "alk": 34.33,
+    "caHard": 188,
+    "cya": 17,
+    "phos": 0.366,
+    "lsi": -1.5,
     "pool": 40000
   },
   "recs": [
     {
-      "param": "PH",
-      "action": "Add 200 mls of Hydrochloric Acid"
+      "param": "TOT. ALKALINITY (ADJUSTED)",
+      "action": "Add 5.5 kg of Vitalyse Alkalinity Up"
     },
     {
-      "param": "FREE CHLORINE",
-      "action": "Add 100 g of Vitalyse Chlorine Remover"
+      "param": "PH",
+      "action": "Add 300 g of Vitalyse pH"
     },
     {
       "param": "TOTAL CHLORINE",
       "action": "Reduce your chlorinator hours/level"
     },
     {
+      "param": "COMBINED CHLORINE",
+      "action": "Add 400 g of Vitalyse Non Chlorine Shock"
+    },
+    {
+      "param": "SALT",
+      "action": "Add 40 kg of Pool Salt"
+    },
+    {
+      "param": "CALCIUM HARDNESS",
+      "action": "Add 1.5 kg of Vitalyse Calcium Up"
+    },
+    {
       "param": "CYANURIC ACID",
-      "action": "Add 500 g of Vitalyse Sunblock"
+      "action": "Add 900 g of Vitalyse Sunblock"
     },
     {
       "param": "PHOSPHATES",
-      "action": "Add 600 mls of Vitalyse Phosphate Remover"
+      "action": "Add 100 mls of Vitalyse Phosphate Remover"
     }
   ]
 }
